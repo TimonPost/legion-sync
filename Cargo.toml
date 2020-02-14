@@ -1,0 +1,13 @@
+[package]
+name = "legion-sync"
+version = "0.1.0"
+authors = ["Timon Post <timonpost@hotmail.nl>"]
+edition = "2018"
+description = "Syncronizes component changes accross the network."
+keywords = ["sync", "entity-sync", "network", "ecs", "legion"]
+exclude = ["target", "Cargo.lock"]
+license = "MIT"
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[dependencies]
