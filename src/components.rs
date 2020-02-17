@@ -1,12 +1,19 @@
+//! A number of components that can be used to synchronize and trace components.
+
 use std::ops::{Deref, DerefMut};
 
 use track::preclude::Uuid;
 
+/// A component with a random `UUID`.
+///
+/// If modifications are serialized we need to know from which component they came.
+/// With this component you can identify your entity.
 pub struct UuidComponent {
     uuid: Uuid,
 }
 
 impl UuidComponent {
+    /// Returns the Uuid of this component.
     pub fn uuid(&self) -> Uuid {
         self.uuid.clone()
     }

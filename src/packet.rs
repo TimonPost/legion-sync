@@ -38,19 +38,25 @@ impl Message {
     }
 }
 
+/// The network packet sent over the network
 #[derive(Debug)]
 pub struct NetworkPacket {
+    /// The identifier that identifies the entity to which this change belongs.
     pub uuid: Uuid,
+    /// The event that defines what kind of packet this is.
     pub event_type: Event,
-    pub remaining_data: Option<Vec<u8>>,
+    /// The remaining data, like modified fields, or created entity.
+    pub data: Option<Vec<u8>>,
 }
 
 impl NetworkPacket {
-    pub fn has_change_data(&self) {
-        self.remaining_data.is_some();
+    /// Returns if there's any data in this package.
+    pub fn has_data(&self) {
+        self.data.is_some();
     }
 }
 
+/// A reader that can read bytes and convert them to a [NetworkPacket](LINK).
 pub struct NetworkPacketReader<'a> {
     cursor: Cursor<&'a [u8]>,
 }
@@ -64,34 +70,38 @@ impl<'a> NetworkPacketReader<'a> {
 }
 
 impl<'a> NetworkPacketReader<'a> {
+    /// Reads data into an [NetworkPacket](LINK).
     pub fn read(&mut self) -> Result<NetworkPacket, std::io::Error> {
         let mut packet = NetworkPacket {
             uuid: Uuid::from_u128(self.cursor.read_u128::<BigEndian>()?),
             event_type: Event::from(self.cursor.read_u8()?),
-            remaining_data: None,
+            data: None,
         };
 
         if packet.event_type == Event::Modified {
             let mut data = Vec::new();
             self.cursor.read_to_end(&mut data)?;
-            packet.remaining_data = Some(data);
+            packet.data = Some(data);
         }
 
         Ok(packet)
     }
 }
 
+// A builder to generate a [NetworkPacket](LINK).
 pub struct NetworkPacketBuilder {
     data: Vec<u8>,
 }
 
 impl NetworkPacketBuilder {
+    /// Creates a new instance of the [NetworkPacketBuilder](LINK).
     pub fn new(entity: Uuid, event_type: Event) -> NetworkPacketBuilder {
         NetworkPacketBuilder { data: Vec::new() }
-            .with_entity(entity)
+            .with_identifier(entity)
             .with_event_type(event_type)
     }
 
+    /// Creates a new instance of the [NetworkPacketBuilder](LINK) with a defined size.
     pub fn with_capacity(
         identity: Uuid,
         event_type: Event,
@@ -100,13 +110,13 @@ impl NetworkPacketBuilder {
         let mut builder = NetworkPacketBuilder {
             data: Vec::with_capacity(capacity + 9),
         }
-        .with_entity(identity)
+        .with_identifier(identity)
         .with_event_type(event_type);
 
         builder
     }
 
-    fn with_entity(mut self, entity: Uuid) -> Self {
+    fn with_identifier(mut self, entity: Uuid) -> Self {
         self.data.write_u128::<BigEndian>(entity.as_u128());
         self
     }
@@ -116,11 +126,13 @@ impl NetworkPacketBuilder {
         self
     }
 
+    /// Appends the given slice to the packet.
     pub fn with_data(mut self, data: &[u8]) -> Self {
         self.data.write_all(data);
         self
     }
 
+    /// Returns the final packet data result.
     pub fn build(self) -> Vec<u8> {
         self.data
     }

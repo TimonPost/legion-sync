@@ -7,6 +7,9 @@ use crate::{
     resources::{ClientUniverseResource, EventListenerResource, TransportResource},
 };
 
+/// This system picks up all the changes since the last tick.
+///
+/// The modifications are retrieved from [EventListenerResource](LINK) and written to [TransportResource](LINK).
 pub fn track_modifications_system() -> Box<dyn Schedulable> {
     SystemBuilder::new("track modifications")
         .write_resource::<TransportResource>()
@@ -17,6 +20,9 @@ pub fn track_modifications_system() -> Box<dyn Schedulable> {
         })
 }
 
+/// This system retrieves all packets with modified data. And compresses them before they are sent.
+///
+/// The packets are retrieved from [TransportResource](LINK) and sent to the endpoint with [ClientResource](LINK).
 pub fn sent_updates_system() -> Box<dyn Schedulable> {
     SystemBuilder::new("sent updates to server")
         .write_resource::<TransportResource>()

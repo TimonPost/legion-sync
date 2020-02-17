@@ -3,10 +3,10 @@ pub use packet::{
     Message, NetworkPacket, NetworkPacketBuilder, NetworkPacketReader, UrgencyRequirement,
 };
 
-mod components;
 mod event;
 mod packet;
 
+pub mod components;
 pub mod resources;
 pub mod systems;
 
