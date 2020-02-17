@@ -6,6 +6,8 @@ use crate::{
     components::UuidComponent,
     resources::{ClientUniverseResource, EventListenerResource, TransportResource},
 };
+use track::serialisation::SerialisationStrategy;
+use net_sync::compression::CompressionStrategy;
 
 /// This system picks up all the changes since the last tick.
 ///
@@ -23,10 +25,10 @@ pub fn track_modifications_system() -> Box<dyn Schedulable> {
 /// This system retrieves all packets with modified data. And compresses them before they are sent.
 ///
 /// The packets are retrieved from [TransportResource](LINK) and sent to the endpoint with [ClientResource](LINK).
-pub fn sent_updates_system() -> Box<dyn Schedulable> {
+pub fn sent_updates_system<S: SerialisationStrategy + 'static, C: CompressionStrategy + 'static>() -> Box<dyn Schedulable> {
     SystemBuilder::new("sent updates to server")
         .write_resource::<TransportResource>()
-        .read_resource::<ClientUniverseResource>()
+        .read_resource::<ClientUniverseResource<S, C>>()
         .build(|_, mut world, mut resources, _| {
             if resources.0.has_messages() {
                 let messages = resources.0.drain_messages(|x| true);

@@ -1,20 +1,21 @@
-use std::net::UdpSocket;
+use std::net::{UdpSocket, SocketAddr};
 
-use net_sync::compression::{lz4::Lz4Compression, ModificationCompressor, CompressionStrategy};
+use net_sync::compression::{lz4::Lz4, ModificationCompressor, CompressionStrategy};
 use track::{preclude::Bincode, serialisation::{SerialisationStrategy,  ModificationSerializer}};
 
 use crate::packet::Message;
 
+//#[derive(Send, Sync)]
 pub struct ClientUniverseResource<S: SerialisationStrategy, C: CompressionStrategy> {
     socket: UdpSocket,
     compression: ModificationCompressor<C>,
     serialisation: ModificationSerializer<S>,
 }
 
-impl<S: SerialisationStrategy, C: CompressionStrategy> ClientUniverseResource<C,S> {
-    pub fn new(serialisation: S, compression: C) -> ClientUniverseResource<S,C> {
+impl<S: SerialisationStrategy, C: CompressionStrategy> ClientUniverseResource<S, C> {
+    pub fn new(serialisation: S, compression: C, addr: SocketAddr) -> ClientUniverseResource<S,C> {
         ClientUniverseResource {
-            socket: UdpSocket::bind("127.0.0.1:1111").unwrap(),
+            socket: UdpSocket::bind(addr).unwrap(),
             compression: ModificationCompressor::new(compression),
             serialisation: ModificationSerializer::new(serialisation),
         }
