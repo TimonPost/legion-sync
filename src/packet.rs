@@ -88,7 +88,7 @@ impl<'a> NetworkPacketReader<'a> {
     }
 }
 
-// A builder to generate a [NetworkPacket](LINK).
+/// A builder to generate a [NetworkPacket](LINK).
 pub struct NetworkPacketBuilder {
     data: Vec<u8>,
 }
@@ -116,16 +116,6 @@ impl NetworkPacketBuilder {
         builder
     }
 
-    fn with_identifier(mut self, entity: Uuid) -> Self {
-        self.data.write_u128::<BigEndian>(entity.as_u128());
-        self
-    }
-
-    fn with_event_type(mut self, event: Event) -> Self {
-        self.data.write_u8(event as u8);
-        self
-    }
-
     /// Appends the given slice to the packet.
     pub fn with_data(mut self, data: &[u8]) -> Self {
         self.data.write_all(data);
@@ -135,5 +125,15 @@ impl NetworkPacketBuilder {
     /// Returns the final packet data result.
     pub fn build(self) -> Vec<u8> {
         self.data
+    }
+
+    fn with_identifier(mut self, entity: Uuid) -> Self {
+        self.data.write_u128::<BigEndian>(entity.as_u128());
+        self
+    }
+
+    fn with_event_type(mut self, event: Event) -> Self {
+        self.data.write_u8(event as u8);
+        self
     }
 }
