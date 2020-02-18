@@ -6,6 +6,8 @@ use track::{
 };
 
 use crate::{components::UuidComponent, resources::SentBufferResource};
+use legion::prelude::Entity;
+use track::preclude::Uuid;
 
 pub struct EventListenerResource {
     modification_channel: ModificationChannel,
@@ -44,17 +46,14 @@ impl EventListenerResource {
         for event in self.legion_events() {
             match event {
                 Event::EntityInserted(entity, _) => {
-                    let uuid_component = world.get_component::<UuidComponent>(entity).unwrap();
+                    let identifier = get_identifier_component(world, entity);
 
-                    transport.send_immediate(
-                        uuid_component.uuid(),
-                        crate::event::Event::Inserted(vec![]),
-                    );
+                    transport.send_immediate(identifier, crate::event::Event::Inserted(vec![]));
                 }
                 Event::EntityRemoved(entity, _) => {
-                    let uuid_component = world.get_component::<UuidComponent>(entity).unwrap();
+                    let identifier = get_identifier_component(world, entity);
 
-                    transport.send_immediate(uuid_component.uuid(), crate::event::Event::Removed);
+                    transport.send_immediate(identifier, crate::event::Event::Removed);
                 }
                 _ => {}
             }
@@ -62,9 +61,22 @@ impl EventListenerResource {
 
         for event in self.changed_components() {
             transport.send(
-                event.identifier.unwrap(),
+                event
+                    .identifier
+                    .expect("Event should always contain identifier."),
                 crate::event::Event::Modified(event.modified_fields),
             );
         }
     }
+}
+
+fn get_identifier_component(world: &SubWorld, entity: Entity) -> Uuid {
+    world
+        .get_component::<UuidComponent>(entity)
+        .expect(
+            "Could not find `UuidComponent`. \
+               This component is needed for tracking purposes. \
+               Make sure to add it to the entity which you are trying to track.",
+        )
+        .uuid()
 }

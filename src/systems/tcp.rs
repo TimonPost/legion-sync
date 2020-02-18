@@ -1,13 +1,14 @@
-use crate::resources::tcp::TcpListenerResource;
-use crate::resources::{
-    BufferResource, ClientResource, Packer, ReceiveBufferResource, SentBufferResource,
+use crate::{
+    resources::{
+        tcp::TcpListenerResource, BufferResource, ClientResource, Packer, ReceiveBufferResource,
+        SentBufferResource,
+    },
+    NetworkPacket, ReceivedPacket,
 };
-use crate::{NetworkPacket, ReceivedPacket};
 use legion::prelude::{Schedulable, SystemBuilder};
-use log::debug;
+use log::{debug, warn};
 use net_sync::compression::CompressionStrategy;
-use std::io;
-use std::io::Read;
+use std::{io, io::Read};
 use track::serialisation::SerialisationStrategy;
 
 pub fn tcp_connection_listener() -> Box<dyn Schedulable> {
@@ -65,7 +66,7 @@ pub fn tcp_receive_system<S: SerialisationStrategy + 'static, C: CompressionStra
                 // connection so we'll mark it inactive.
                 let peer_addr = match stream.peer_addr() {
                     Ok(addr) => addr,
-                    Err(e) => {
+                    Err(_e) => {
                         *active = false;
                         continue;
                     }
@@ -82,18 +83,28 @@ pub fn tcp_receive_system<S: SerialisationStrategy + 'static, C: CompressionStra
                                     recv_len, peer_addr
                                 );
 
-                                let decompressed = unpacker
+                                match unpacker
                                     .compression()
-                                    .decompress(recv_buffer[..recv_len].to_vec())
-                                    .unwrap();
+                                    .decompress(&recv_buffer[..recv_len]) {
+                                    Ok(decompressed) => {
 
-                                let _ = unpacker
-                                    .serialisation()
-                                    .deserialize::<Vec<NetworkPacket>>(&decompressed)
-                                    .unwrap()
-                                    .into_iter()
-                                    .map(|p| receive_queue.push(ReceivedPacket::new(peer_addr, p)))
-                                    .collect::<()>();
+                                        match unpacker
+                                            .serialisation()
+                                            .deserialize::<Vec<NetworkPacket>>(&decompressed)  {
+                                            Ok(deserialized) => {
+                                                let _ = deserialized.into_iter()
+                                                    .map(|p| receive_queue.push(ReceivedPacket::new(peer_addr, p)))
+                                                    .collect::<()>();
+                                            }
+                                            Err(e) => {
+                                                warn!("Error occurred when deserializing TCP-packet. Reason: {:?}", e);
+                                            }
+                                        }
+                                    }
+                                    Err(e) => {
+                                        warn!("Error occurred when decompressing TCP-packet. Reason: {:?}", e);
+                                    }
+                                }
                             } else {
                                 *active = false;
                                 break;
@@ -132,10 +143,20 @@ pub fn tcp_sent_system<S: SerialisationStrategy + 'static, C: CompressionStrateg
                 .map(|message| NetworkPacket::new(message.uuid, message.event))
                 .collect::<Vec<NetworkPacket>>();
 
-            let compressed = packer
-                .compression()
-                .compress(&packer.serialisation().serialize(&data));
+            match &packer.serialisation().serialize(&data) {
+                Ok(serialized) => {
+                    let compressed = packer.compression().compress(&serialized);
 
-            client.sent(&compressed.data);
+                    if let Err(e) = client.sent(&compressed) {
+                        warn!("Error occurred when sending TCP-packet. Reason: {:?}", e);
+                    }
+                }
+                Err(e) => {
+                    warn!(
+                        "Error occurred when serializing TCP-packet. Reason: {:?}",
+                        e
+                    );
+                }
+            }
         })
 }

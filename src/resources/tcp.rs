@@ -1,6 +1,7 @@
-use std::collections::hash_map::IterMut;
-use std::collections::HashMap;
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::{
+    collections::{hash_map::IterMut, HashMap},
+    net::{SocketAddr, TcpListener, TcpStream},
+};
 
 pub struct TcpListenerResource {
     listener: Option<TcpListener>,

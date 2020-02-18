@@ -1,8 +1,10 @@
 //! A number of resources that can be used to synchronize and trace components.
 
 pub use self::{
-    client::ClientResource, event_listener::EventListenerResource,
-    transport::ReceiveBufferResource, transport::SentBufferResource, unpacker::Packer,
+    client::ClientResource,
+    event_listener::EventListenerResource,
+    transport::{ReceiveBufferResource, SentBufferResource},
+    unpacker::Packer,
 };
 
 mod client;

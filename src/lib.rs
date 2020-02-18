@@ -5,6 +5,7 @@ mod event;
 mod packet;
 
 pub mod components;
+pub mod error;
 pub mod resources;
 pub mod systems;
 
