@@ -1,46 +1,18 @@
-use std::net::{UdpSocket, SocketAddr};
+use std::io::Write;
+use std::net::{SocketAddr, TcpStream};
 
-use net_sync::compression::{lz4::Lz4, ModificationCompressor, CompressionStrategy};
-use track::{preclude::Bincode, serialisation::{SerialisationStrategy,  ModificationSerializer}};
-
-use crate::packet::Message;
-
-//#[derive(Send, Sync)]
-pub struct ClientUniverseResource<S: SerialisationStrategy, C: CompressionStrategy> {
-    socket: UdpSocket,
-    compression: ModificationCompressor<C>,
-    serialisation: ModificationSerializer<S>,
+pub struct ClientResource {
+    socket: TcpStream,
 }
 
-impl<S: SerialisationStrategy, C: CompressionStrategy> ClientUniverseResource<S, C> {
-    pub fn new(serialisation: S, compression: C, addr: SocketAddr) -> ClientUniverseResource<S,C> {
-        ClientUniverseResource {
-            socket: UdpSocket::bind(addr).unwrap(),
-            compression: ModificationCompressor::new(compression),
-            serialisation: ModificationSerializer::new(serialisation),
+impl ClientResource {
+    pub fn new(addr: SocketAddr) -> ClientResource {
+        ClientResource {
+            socket: TcpStream::connect(addr).unwrap(),
         }
     }
 
-    pub fn sent(&self, messages: Vec<Message>) {
-        let data = messages
-            .into_iter()
-            .map(|message| message.payload)
-            .collect::<Vec<Vec<u8>>>();
-
-        let compressed = self
-            .compression
-            .compress(&self.serialisation.serialize(&data));
-
-        self.socket.send_to(&compressed.data, "127.0.0.1:1119");
-    }
-}
-
-impl<S: SerialisationStrategy, C: CompressionStrategy> Default for ClientUniverseResource<S,C> {
-    fn default() -> Self {
-        ClientUniverseResource {
-            socket: UdpSocket::bind("127.0.0.1:0").unwrap(),
-            compression: ModificationCompressor::new(C::default()),
-            serialisation: ModificationSerializer::new(S::default()),
-        }
+    pub fn sent(&mut self, data: &[u8]) {
+        self.socket.write(data).unwrap();
     }
 }

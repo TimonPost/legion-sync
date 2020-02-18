@@ -5,7 +5,7 @@ use track::{
     ModificationChannel, ModificationEvent,
 };
 
-use crate::{components::UuidComponent, resources::TransportResource, NetworkPacketBuilder};
+use crate::{components::UuidComponent, resources::SentBufferResource};
 
 pub struct EventListenerResource {
     modification_channel: ModificationChannel,
@@ -40,45 +40,31 @@ impl EventListenerResource {
         &self.modification_channel.sender()
     }
 
-    pub fn gather_events(&self, transport: &mut TransportResource, world: &mut SubWorld) {
-        for event in self.changed_components() {
-            transport.send(
-                &NetworkPacketBuilder::with_capacity(
-                    event.identifier.unwrap(),
-                    crate::event::Event::Modified,
-                    event.modified_fields.len(),
-                )
-                .with_data(&event.modified_fields)
-                .build(),
-            );
-        }
-
+    pub fn gather_events(&self, transport: &mut SentBufferResource, world: &mut SubWorld) {
         for event in self.legion_events() {
             match event {
                 Event::EntityInserted(entity, _) => {
                     let uuid_component = world.get_component::<UuidComponent>(entity).unwrap();
 
                     transport.send_immediate(
-                        &NetworkPacketBuilder::new(
-                            uuid_component.uuid(),
-                            crate::event::Event::Inserted,
-                        )
-                        .build(),
+                        uuid_component.uuid(),
+                        crate::event::Event::Inserted(vec![]),
                     );
                 }
                 Event::EntityRemoved(entity, _) => {
                     let uuid_component = world.get_component::<UuidComponent>(entity).unwrap();
 
-                    transport.send_immediate(
-                        &NetworkPacketBuilder::new(
-                            uuid_component.uuid(),
-                            crate::event::Event::Inserted,
-                        )
-                        .build(),
-                    );
+                    transport.send_immediate(uuid_component.uuid(), crate::event::Event::Removed);
                 }
                 _ => {}
             }
+        }
+
+        for event in self.changed_components() {
+            transport.send(
+                event.identifier.unwrap(),
+                crate::event::Event::Modified(event.modified_fields),
+            );
         }
     }
 }

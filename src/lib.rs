@@ -1,7 +1,5 @@
 pub use event::Event;
-pub use packet::{
-    Message, NetworkPacket, NetworkPacketBuilder, NetworkPacketReader, UrgencyRequirement,
-};
+pub use packet::{Message, NetworkPacket, ReceivedPacket, UrgencyRequirement};
 
 mod event;
 mod packet;

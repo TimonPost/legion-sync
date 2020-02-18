@@ -1,15 +1,40 @@
 use std::collections::VecDeque;
 
-use crate::{Message, UrgencyRequirement};
+use crate::{Event, Message, ReceivedPacket, UrgencyRequirement};
+use std::collections::vec_deque::Drain;
+use track::preclude::Uuid;
+
+/// Resource containing the received messages.
+pub struct ReceiveBufferResource {
+    messages: VecDeque<ReceivedPacket>,
+}
+
+impl ReceiveBufferResource {
+    pub fn drain(&mut self) -> Drain<'_, ReceivedPacket> {
+        self.messages.drain(0..self.messages.len())
+    }
+
+    pub fn push(&mut self, packet: ReceivedPacket) {
+        self.messages.push_back(packet)
+    }
+}
+
+impl Default for ReceiveBufferResource {
+    fn default() -> Self {
+        ReceiveBufferResource {
+            messages: Default::default(),
+        }
+    }
+}
 
 /// Resource serving as the owner of the queue of messages to be sent. This resource also serves
 /// as the interface for other systems to send messages.
-pub struct TransportResource {
+pub struct SentBufferResource {
     messages: VecDeque<Message>,
     frame_budget_bytes: i32,
 }
 
-impl TransportResource {
+impl SentBufferResource {
     /// Creates a new `TransportResource`.
     pub fn new() -> Self {
         Self {
@@ -30,16 +55,16 @@ impl TransportResource {
 
     /// Creates a `Message` with the default guarantees provided by the `Socket` implementation and
     /// pushes it onto the messages queue to be sent on next sim tick.
-    pub fn send(&mut self, payload: &[u8]) {
+    pub fn send(&mut self, uuid: Uuid, event: Event) {
         self.messages
-            .push_back(Message::new(payload, UrgencyRequirement::OnTick));
+            .push_back(Message::new(uuid, event, UrgencyRequirement::OnTick));
     }
 
     /// Creates a `Message` with the default guarantees provided by the `Socket` implementation and
     /// Pushes it onto the messages queue to be sent immediately.
-    pub fn send_immediate(&mut self, payload: &[u8]) {
+    pub fn send_immediate(&mut self, uuid: Uuid, event: Event) {
         self.messages
-            .push_back(Message::new(payload, UrgencyRequirement::Immediate));
+            .push_back(Message::new(uuid, event, UrgencyRequirement::Immediate));
     }
 
     /// Returns true if there are messages enqueued to be sent.
@@ -82,7 +107,7 @@ impl TransportResource {
     }
 }
 
-impl Default for TransportResource {
+impl Default for SentBufferResource {
     fn default() -> Self {
         Self {
             messages: VecDeque::new(),
@@ -146,7 +171,7 @@ mod tests {
         b"test"
     }
 
-    fn create_test_resource() -> TransportResource {
-        TransportResource::new()
+    fn create_test_resource() -> SentBufferResource {
+        SentBufferResource::new()
     }
 }
