@@ -1,7 +1,7 @@
+use crate::resources::tcp::TcpClientResource;
 use crate::{
     resources::{
-        tcp::TcpListenerResource, BufferResource, ClientResource, Packer, ReceiveBufferResource,
-        SentBufferResource,
+        tcp::TcpListenerResource, BufferResource, Packer, ReceiveBufferResource, SentBufferResource,
     },
     NetworkPacket, ReceivedPacket,
 };
@@ -129,7 +129,7 @@ pub fn tcp_receive_system<S: SerialisationStrategy + 'static, C: CompressionStra
 pub fn tcp_sent_system<S: SerialisationStrategy + 'static, C: CompressionStrategy + 'static>(
 ) -> Box<dyn Schedulable> {
     SystemBuilder::new("tcp_sent_system")
-        .write_resource::<ClientResource>()
+        .write_resource::<TcpClientResource>()
         .write_resource::<SentBufferResource>()
         .read_resource::<Packer<S, C>>()
         .build(|_, _, resources, _| {
@@ -140,7 +140,7 @@ pub fn tcp_sent_system<S: SerialisationStrategy + 'static, C: CompressionStrateg
             let data = sent_buffer
                 .drain_messages(|_| true)
                 .into_iter()
-                .map(|message| NetworkPacket::new(message.uuid, message.event))
+                .map(|message| NetworkPacket::new(message.identifier, message.event))
                 .collect::<Vec<NetworkPacket>>();
 
             match &packer.serialisation().serialize(&data) {

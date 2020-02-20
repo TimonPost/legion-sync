@@ -5,28 +5,28 @@ use track::{
     ModificationChannel, ModificationEvent,
 };
 
-use crate::{components::UuidComponent, resources::SentBufferResource};
+use crate::{components::UidComponent, resources::SentBufferResource};
 use legion::prelude::Entity;
-use track::preclude::Uuid;
+use net_sync::uid::Uid;
 
-pub struct EventListenerResource {
-    modification_channel: ModificationChannel,
+pub struct EventResource {
+    modification_channel: ModificationChannel<Uid>,
     legion_events_tx: Sender<Event>,
     legion_events_rx: Receiver<Event>,
 }
 
-impl EventListenerResource {
-    pub fn new() -> EventListenerResource {
+impl EventResource {
+    pub fn new() -> EventResource {
         let (tx, rx) = unbounded();
 
-        EventListenerResource {
+        EventResource {
             legion_events_tx: tx,
             legion_events_rx: rx,
             modification_channel: ModificationChannel::new(),
         }
     }
 
-    fn changed_components(&self) -> TryIter<ModificationEvent> {
+    fn changed_components(&self) -> TryIter<ModificationEvent<Uid>> {
         self.modification_channel.receiver().try_iter()
     }
 
@@ -38,16 +38,15 @@ impl EventListenerResource {
         &self.legion_events_tx
     }
 
-    pub fn notifier(&self) -> &Sender<ModificationEvent> {
+    pub fn notifier(&self) -> &Sender<ModificationEvent<Uid>> {
         &self.modification_channel.sender()
     }
 
     pub fn gather_events(&self, transport: &mut SentBufferResource, world: &mut SubWorld) {
         for event in self.legion_events() {
             match event {
-                Event::EntityInserted(entity, _) => {
+                Event::EntityInserted(entity, chunk_id) => {
                     let identifier = get_identifier_component(world, entity);
-
                     transport.send_immediate(identifier, crate::event::Event::Inserted(vec![]));
                 }
                 Event::EntityRemoved(entity, _) => {
@@ -61,22 +60,20 @@ impl EventListenerResource {
 
         for event in self.changed_components() {
             transport.send(
-                event
-                    .identifier
-                    .expect("Event should always contain identifier."),
+                event.identifier,
                 crate::event::Event::Modified(event.modified_fields),
             );
         }
     }
 }
 
-fn get_identifier_component(world: &SubWorld, entity: Entity) -> Uuid {
+fn get_identifier_component(world: &SubWorld, entity: Entity) -> Uid {
     world
-        .get_component::<UuidComponent>(entity)
+        .get_component::<UidComponent>(entity)
         .expect(
             "Could not find `UuidComponent`. \
                This component is needed for tracking purposes. \
                Make sure to add it to the entity which you are trying to track.",
         )
-        .uuid()
+        .uid()
 }

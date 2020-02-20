@@ -1,7 +1,26 @@
 use std::{
     collections::{hash_map::IterMut, HashMap},
+    io::Write,
     net::{SocketAddr, TcpListener, TcpStream},
 };
+
+use crate::error::ErrorKind;
+
+pub struct TcpClientResource {
+    socket: TcpStream,
+}
+
+impl TcpClientResource {
+    pub fn new(addr: SocketAddr) -> Result<TcpClientResource, ErrorKind> {
+        Ok(TcpClientResource {
+            socket: TcpStream::connect(addr)?,
+        })
+    }
+
+    pub fn sent(&mut self, data: &[u8]) -> Result<usize, ErrorKind> {
+        Ok(self.socket.write(data)?)
+    }
+}
 
 pub struct TcpListenerResource {
     listener: Option<TcpListener>,

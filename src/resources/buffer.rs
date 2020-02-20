@@ -1,28 +1,73 @@
 use std::collections::VecDeque;
 
+use crate::resources::TrackResource;
 use crate::{Event, Message, ReceivedPacket, UrgencyRequirement};
+use net_sync::uid::Uid;
 use std::collections::vec_deque::Drain;
-use track::preclude::Uuid;
+
+pub struct BufferResource {
+    pub recv_buffer: Vec<u8>,
+}
+
+impl BufferResource {
+    pub fn from_capacity(size: usize) -> BufferResource {
+        BufferResource {
+            recv_buffer: vec![0; size],
+        }
+    }
+}
 
 /// Resource containing the received messages.
 pub struct ReceiveBufferResource {
     messages: VecDeque<ReceivedPacket>,
+    track_cash: TrackResource,
 }
 
 impl ReceiveBufferResource {
-    pub fn drain(&mut self) -> Drain<'_, ReceivedPacket> {
-        self.messages.drain(0..self.messages.len())
+    pub fn drain(&mut self, mut filter: impl FnMut(&Event, Uid) -> bool) -> Vec<ReceivedPacket> {
+        let mut drained = Vec::with_capacity(self.messages.len());
+        let mut i = 0;
+        while i != self.messages.len() {
+            if filter(&self.messages[i].event(), self.messages[i].identifier()) {
+                if let Some(m) = self.messages.remove(i) {
+                    drained.push(m);
+                }
+            } else {
+                i += 1;
+            }
+        }
+        drained
     }
 
     pub fn push(&mut self, packet: ReceivedPacket) {
+        let identifier = packet.identifier().0 as usize;
+        let cash = &mut self.track_cash;
+
+        match packet.event() {
+            Event::Inserted(_) => {
+                cash.insert(identifier);
+            }
+            Event::Modified(_) => {
+                cash.modify(identifier);
+            }
+            Event::Removed => {
+                cash.remove(identifier);
+            }
+        }
+
         self.messages.push_back(packet)
+    }
+
+    pub fn tracking_cash(&self) -> &TrackResource {
+        &self.track_cash
     }
 }
 
 impl Default for ReceiveBufferResource {
     fn default() -> Self {
         ReceiveBufferResource {
-            messages: Default::default(),
+            messages: VecDeque::new(),
+            track_cash: TrackResource::new(),
         }
     }
 }
@@ -55,16 +100,16 @@ impl SentBufferResource {
 
     /// Creates a `Message` with the default guarantees provided by the `Socket` implementation and
     /// pushes it onto the messages queue to be sent on next sim tick.
-    pub fn send(&mut self, uuid: Uuid, event: Event) {
+    pub fn send(&mut self, uid: Uid, event: Event) {
         self.messages
-            .push_back(Message::new(uuid, event, UrgencyRequirement::OnTick));
+            .push_back(Message::new(uid, event, UrgencyRequirement::OnTick));
     }
 
     /// Creates a `Message` with the default guarantees provided by the `Socket` implementation and
     /// Pushes it onto the messages queue to be sent immediately.
-    pub fn send_immediate(&mut self, uuid: Uuid, event: Event) {
+    pub fn send_immediate(&mut self, uid: Uid, event: Event) {
         self.messages
-            .push_back(Message::new(uuid, event, UrgencyRequirement::Immediate));
+            .push_back(Message::new(uid, event, UrgencyRequirement::Immediate));
     }
 
     /// Returns true if there are messages enqueued to be sent.

@@ -3,8 +3,8 @@
 use legion::prelude::{Schedulable, SystemBuilder};
 
 use crate::{
-    components::UuidComponent,
-    resources::{EventListenerResource, SentBufferResource},
+    components::UidComponent,
+    resources::{EventResource, SentBufferResource},
 };
 
 pub mod tcp;
@@ -15,8 +15,8 @@ pub mod tcp;
 pub fn track_modifications_system() -> Box<dyn Schedulable> {
     SystemBuilder::new("track_modifications_system")
         .write_resource::<SentBufferResource>()
-        .read_resource::<EventListenerResource>()
-        .read_component::<UuidComponent>()
+        .read_resource::<EventResource>()
+        .read_component::<UidComponent>()
         .build(|_, world, resources, _| {
             resources.1.gather_events(&mut resources.0, world);
         })
