@@ -1,6 +1,5 @@
 use crate::event::Event;
-use std::fmt::Debug;
-use std::net::SocketAddr;
+use std::{fmt::Debug, net::SocketAddr};
 
 use net_sync::uid::Uid;
 use serde::{Deserialize, Serialize};
@@ -95,13 +94,21 @@ impl ReceivedPacket {
 #[derive(Clone, Debug, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
 pub struct NetworkPacket {
     /// The identifier that identifies the entity to which this change belongs.
-    pub identifier: Uid,
+    identifier: Uid,
     /// The event that defines what kind of packet this is.
-    pub event: Event,
+    event: Event,
 }
 
 impl NetworkPacket {
     pub fn new(identifier: Uid, event: Event) -> NetworkPacket {
         NetworkPacket { identifier, event }
+    }
+
+    pub fn identifier(&self) -> &Uid {
+        &self.identifier
+    }
+
+    pub fn event(&self) -> &Event {
+        &self.event
     }
 }

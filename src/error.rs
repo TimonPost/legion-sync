@@ -1,6 +1,8 @@
-use std::fmt::{Display, Formatter};
-use std::io;
-use std::io::Error;
+use std::{
+    fmt::{Display, Formatter},
+    io,
+    io::Error,
+};
 
 /// Wrapper for all errors that can occur in `crossterm`.
 #[derive(Debug)]

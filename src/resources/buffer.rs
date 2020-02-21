@@ -1,9 +1,7 @@
 use std::collections::VecDeque;
 
-use crate::resources::TrackResource;
 use crate::{Event, Message, ReceivedPacket, UrgencyRequirement};
 use net_sync::uid::Uid;
-use std::collections::vec_deque::Drain;
 
 pub struct BufferResource {
     pub recv_buffer: Vec<u8>,
@@ -20,7 +18,6 @@ impl BufferResource {
 /// Resource containing the received messages.
 pub struct ReceiveBufferResource {
     messages: VecDeque<ReceivedPacket>,
-    track_cash: TrackResource,
 }
 
 impl ReceiveBufferResource {
@@ -40,26 +37,7 @@ impl ReceiveBufferResource {
     }
 
     pub fn push(&mut self, packet: ReceivedPacket) {
-        let identifier = packet.identifier().0 as usize;
-        let cash = &mut self.track_cash;
-
-        match packet.event() {
-            Event::Inserted(_) => {
-                cash.insert(identifier);
-            }
-            Event::Modified(_) => {
-                cash.modify(identifier);
-            }
-            Event::Removed => {
-                cash.remove(identifier);
-            }
-        }
-
         self.messages.push_back(packet)
-    }
-
-    pub fn tracking_cash(&self) -> &TrackResource {
-        &self.track_cash
     }
 }
 
@@ -67,7 +45,6 @@ impl Default for ReceiveBufferResource {
     fn default() -> Self {
         ReceiveBufferResource {
             messages: VecDeque::new(),
-            track_cash: TrackResource::new(),
         }
     }
 }

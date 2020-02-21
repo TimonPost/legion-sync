@@ -1,9 +1,9 @@
-use crate::resources::tcp::TcpClientResource;
 use crate::{
     resources::{
-        tcp::TcpListenerResource, BufferResource, Packer, ReceiveBufferResource, SentBufferResource,
+        tcp::{TcpClientResource, TcpListenerResource},
+        BufferResource, Packer, ReceiveBufferResource, SentBufferResource, TrackResource,
     },
-    NetworkPacket, ReceivedPacket,
+    Event, NetworkPacket, ReceivedPacket,
 };
 use legion::prelude::{Schedulable, SystemBuilder};
 use log::{debug, warn};
@@ -55,11 +55,13 @@ pub fn tcp_receive_system<S: SerialisationStrategy + 'static, C: CompressionStra
         .write_resource::<ReceiveBufferResource>()
         .read_resource::<Packer<S, C>>()
         .write_resource::<BufferResource>()
+        .write_resource::<TrackResource>()
         .build(|_, _, resources, _| {
             let tcp = &mut resources.0;
-            let recv_buffer = &mut resources.3.recv_buffer;
             let receive_queue = &mut resources.1;
             let unpacker = &resources.2;
+            let recv_buffer = &mut resources.3.recv_buffer;
+            let tracker = &mut resources.4;
 
             for (_, (active, stream)) in tcp.iter_mut() {
                 // If we can't get a peer_addr, there is likely something pretty wrong with the
@@ -87,13 +89,27 @@ pub fn tcp_receive_system<S: SerialisationStrategy + 'static, C: CompressionStra
                                     .compression()
                                     .decompress(&recv_buffer[..recv_len]) {
                                     Ok(decompressed) => {
-
                                         match unpacker
                                             .serialisation()
                                             .deserialize::<Vec<NetworkPacket>>(&decompressed)  {
                                             Ok(deserialized) => {
                                                 let _ = deserialized.into_iter()
-                                                    .map(|p| receive_queue.push(ReceivedPacket::new(peer_addr, p)))
+                                                    .map(|p| {
+                                                        let id = p.identifier().0 as usize;
+                                                        match p.event() {
+                                                            Event::Inserted(_) => {
+                                                                tracker.insert(id);
+                                                            }
+                                                            Event::Modified(_) => {
+                                                                tracker.modify(id);
+                                                            }
+                                                            Event::Removed => {
+                                                                tracker.remove(id);
+                                                            }
+                                                        }
+
+                                                        receive_queue.push(ReceivedPacket::new(peer_addr, p));
+                                                    })
                                                     .collect::<()>();
                                             }
                                             Err(e) => {

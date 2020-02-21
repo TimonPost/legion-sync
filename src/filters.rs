@@ -1,74 +1,76 @@
-use std::marker::PhantomData;
-use std::sync::atomic::Ordering;
-
-use legion::filter::*;
-use legion::iterator::SliceVecIter;
-use legion::prelude::*;
-use legion::storage::ComponentStorage;
-use legion::storage::{Component, ComponentResourceSet, ComponentTypeId};
-use crate::components::UidComponent;
-use crate::resources::TrackResource;
+use crate::{components::UidComponent, resources::TrackResource};
+use legion::{
+    filter::*,
+    storage::{ComponentResourceSet, ComponentStorage, ComponentTypeId},
+};
 use std::slice::Iter;
 
 pub mod filter_fns {
-    use super::{TrackFilter, ModifiedFilter, RemovedFilter, InsertedFilter, TrackResourceFilter};
-    use legion::filter::EntityFilterTuple;
-    use legion::filter::Passthrough;
-    use legion::storage::Component;
-    use std::marker::PhantomData;
-    use crate::resources::TrackResource;
+    use super::{ModifiedFilter, RemovedFilter, TrackFilter};
+    use crate::{filters::AllFilter, resources::TrackResource};
+    use legion::filter::{EntityFilterTuple, Passthrough};
+
+    pub fn all<'a>(
+        cash: &'a TrackResource,
+    ) -> EntityFilterTuple<Passthrough, Passthrough, TrackFilter<'a, AllFilter>> {
+        EntityFilterTuple::new(
+            Passthrough,
+            Passthrough,
+            TrackFilter::<AllFilter>::new(cash, AllFilter),
+        )
+    }
 
     /// Creates an entity data filter which includes chunks that contain
     /// entity data components of type `T`.
     pub fn modified<'a>(
         cash: &'a TrackResource,
     ) -> EntityFilterTuple<Passthrough, Passthrough, TrackFilter<'a, ModifiedFilter>> {
-        EntityFilterTuple::new(Passthrough, Passthrough, TrackFilter::<ModifiedFilter>::new(cash, ModifiedFilter))
-    }
-
-    /// Creates an entity data filter which includes chunks that contain
-/// entity data components of type `T`.
-    pub fn removed<'a>(
-        cash: &'a TrackResource,
-    ) -> EntityFilterTuple<Passthrough, Passthrough, TrackFilter<'a, RemovedFilter>> {
-        EntityFilterTuple::new(Passthrough, Passthrough, TrackFilter::<RemovedFilter>::new(cash, RemovedFilter))
+        EntityFilterTuple::new(
+            Passthrough,
+            Passthrough,
+            TrackFilter::<ModifiedFilter>::new(cash, ModifiedFilter),
+        )
     }
 
     /// Creates an entity data filter which includes chunks that contain
     /// entity data components of type `T`.
-    pub fn inserted<'a>(
+    pub fn removed<'a>(
         cash: &'a TrackResource,
-    ) -> EntityFilterTuple<Passthrough, Passthrough, TrackFilter<'a, InsertedFilter>> {
-        EntityFilterTuple::new(Passthrough, Passthrough, TrackFilter::<InsertedFilter>::new(cash, InsertedFilter))
+    ) -> EntityFilterTuple<Passthrough, Passthrough, TrackFilter<'a, RemovedFilter>> {
+        EntityFilterTuple::new(
+            Passthrough,
+            Passthrough,
+            TrackFilter::<RemovedFilter>::new(cash, RemovedFilter),
+        )
     }
 }
-
+#[derive(Clone)]
+pub struct AllFilter;
 #[derive(Clone)]
 pub struct RemovedFilter;
 #[derive(Clone)]
-pub struct InsertedFilter;
-#[derive(Clone)]
 pub struct ModifiedFilter;
 
-pub trait TrackResourceFilter : Send + Sync + Clone {
+pub trait TrackResourceFilter: Send + Sync + Clone {
     fn filter(&self, resource: &TrackResource, identifier: usize) -> bool;
+}
+impl TrackResourceFilter for AllFilter {
+    fn filter(&self, resource: &TrackResource, identifier: usize) -> bool {
+        resource.removed.contains(identifier)
+            || return resource.inserted.contains(identifier)
+                || return resource.modified.contains(identifier)
+    }
 }
 
 impl TrackResourceFilter for RemovedFilter {
     fn filter(&self, resource: &TrackResource, identifier: usize) -> bool {
-        return resource.removed.contains(identifier as usize)
-    }
-}
-
-impl TrackResourceFilter for InsertedFilter {
-    fn filter(&self, resource: &TrackResource, identifier: usize) -> bool {
-        return resource.inserted.contains(identifier as usize)
+        return resource.removed.contains(identifier);
     }
 }
 
 impl TrackResourceFilter for ModifiedFilter {
     fn filter(&self, resource: &TrackResource, identifier: usize) -> bool {
-        return resource.modified.contains(identifier as usize)
+        return resource.modified.contains(identifier);
     }
 }
 
@@ -77,18 +79,18 @@ impl TrackResourceFilter for ModifiedFilter {
 #[derive(Debug, Clone)]
 pub struct TrackFilter<'a, F: TrackResourceFilter> {
     cash: &'a TrackResource,
-    filter: F
+    filter: F,
 }
 
-impl<'a, F: TrackResourceFilter> TrackFilter<'a,F> {
-    pub fn new(cash: &'a TrackResource, filter: F) -> TrackFilter<'_,F> {
+impl<'a, F: TrackResourceFilter> TrackFilter<'a, F> {
+    pub fn new(cash: &'a TrackResource, filter: F) -> TrackFilter<'_, F> {
         TrackFilter { cash, filter }
     }
 }
 
-impl<'a, F: TrackResourceFilter> ActiveFilter for TrackFilter<'_,F> {}
+impl<'a, F: TrackResourceFilter> ActiveFilter for TrackFilter<'_, F> {}
 
-impl<'a, F: TrackResourceFilter> Filter<ChunkFilterData<'a>> for TrackFilter<'_,F> {
+impl<'a, F: TrackResourceFilter> Filter<ChunkFilterData<'a>> for TrackFilter<'_, F> {
     type Iter = Iter<'a, ComponentStorage>;
 
     fn collect(&self, source: ChunkFilterData<'a>) -> Self::Iter {
@@ -108,14 +110,12 @@ impl<'a, F: TrackResourceFilter> Filter<ChunkFilterData<'a>> for TrackFilter<'_,
 
         unsafe {
             let raw = &components.data_slice::<UidComponent>()[0];
-            return Some(self.filter.filter(&self.cash, raw.uid().0 as usize));
+            Some(self.filter.filter(&self.cash, raw.uid().0 as usize))
         }
-
-        Some(false)
     }
 }
 
-impl<'a, F: TrackResourceFilter> std::ops::Not for TrackFilter<'_,F> {
+impl<'a, F: TrackResourceFilter> std::ops::Not for TrackFilter<'_, F> {
     type Output = Not<Self>;
 
     #[inline]
@@ -135,7 +135,7 @@ impl<'a, Rhs: ActiveFilter, F: TrackResourceFilter> std::ops::BitAnd<Rhs> for Tr
     }
 }
 
-impl<'a, F: TrackResourceFilter> std::ops::BitOr<Passthrough> for TrackFilter<'_,F> {
+impl<'a, F: TrackResourceFilter> std::ops::BitOr<Passthrough> for TrackFilter<'_, F> {
     type Output = Self;
 
     #[inline]

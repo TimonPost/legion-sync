@@ -6,9 +6,9 @@ mod packet;
 
 pub mod components;
 pub mod error;
+pub mod filters;
 pub mod resources;
 pub mod systems;
-pub mod filters;
 
 pub mod tracking {
     //! Re-export of the [track](LINK) crate.
