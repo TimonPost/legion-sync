@@ -4,22 +4,34 @@
 ![Lines of Code][loc-badge]
 [![MIT][license-badge]][license-link] 
 
+# Development Note
+
+There's a lot of construction work at the moment.
+Don't use this library yet! Unless you want to contribute, of course. 
+In terms of design there is nothing definitive, 
+at the moment I'm still working on an API and I'm still in the research phase. 
+ 
+See [examples](https://github.com/entity-sync-rs/legion-sync/tree/master/examples) for the operation of the API. 
+I try to keep these up to date as much as possible. 
+I also have a [base-game](https://github.com/entity-sync-rs/example-game) with which I develop this game. 
+Feel free to ping me in the amethyst discord (Timon | Flying Dutchman#4256)
+
 # Synchronize legion entities.
 This library offers an abstraction on top of legion that can synchronize changing entities to other players.
 
 ## Features
 
-- [X] Synchronize modified components. 
+- [X] Synchronize modified components.
+    - [X] TCP-networking support.
+    - [X] Tracks addition/removal/modification of components.     
 - [X] Supports Custom compression.
 - [X] Supports Custom serialisation.
-- [X] Tracks addition/removal/modification of components.
+- [X] Some resources, systems, components which makes entity synchronisation more easier.
+- [X] Extra entity filters.
 
 # Examples
 
-First, add `track` attribute to mark type as trackable.
-```rust
-
-```
+Upcomming...
 
 [crate-badge]: https://img.shields.io/crates/v/legion-sync.svg
 [crate-link]: https://crates.io/crates/legion-sync

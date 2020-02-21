@@ -1,9 +1,9 @@
 [package]
 name = "legion-sync"
-version = "0.1.0"
+version = "0.0.1"
 authors = ["Timon Post <timonpost@hotmail.nl>"]
 edition = "2018"
-description = "Tracks and syncronizes component changes accross the network."
+description = "Tracks and syncronizes entity changes accross the network."
 keywords = ["sync", "entity-sync", "network", "ecs", "legion"]
 exclude = ["target", "Cargo.lock"]
 license = "MIT"
@@ -12,7 +12,7 @@ documentation = "https://docs.rs/legion-sync/"
 readme = "README.md"
 
 [dependencies]
-net-sync = { path = "../net-sync" }
+net-sync = { version = "0.0.1", path = "../net-sync" }
 track = { version = "0.1.0", path = "../track" }
 
 legion = { version = "0.2.1", git = "https://github.com/TomGillen/legion", branch = "master" }
