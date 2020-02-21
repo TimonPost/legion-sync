@@ -21,7 +21,28 @@ pub struct ReceiveBufferResource {
 }
 
 impl ReceiveBufferResource {
-    pub fn drain(&mut self, mut filter: impl FnMut(&Event, Uid) -> bool) -> Vec<ReceivedPacket> {
+    pub fn drain_modified(&mut self) -> Vec<ReceivedPacket> {
+        self.drain(|event, id| match event {
+            Event::Modified(_) => true,
+            _ => false,
+        })
+    }
+
+    pub fn drain_removed(&mut self) -> Vec<ReceivedPacket> {
+        self.drain(|event, id| match event {
+            Event::Removed => true,
+            _ => false,
+        })
+    }
+
+    pub fn drain_inserted(&mut self) -> Vec<ReceivedPacket> {
+        self.drain(|event, id| match event {
+            Event::Inserted(_) => true,
+            _ => false,
+        })
+    }
+
+    fn drain(&mut self, mut filter: impl FnMut(&Event, Uid) -> bool) -> Vec<ReceivedPacket> {
         let mut drained = Vec::with_capacity(self.messages.len());
         let mut i = 0;
         while i != self.messages.len() {
