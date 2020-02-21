@@ -13,7 +13,7 @@ pub enum ErrorKind {
 impl Display for ErrorKind {
     fn fmt(&self, fmt: &mut Formatter<'_>) -> std::fmt::Result {
         match self {
-            ErrorKind::IoError(e) => write!(fmt, "Serialisation error occurred: {:?}", e),
+            ErrorKind::IoError(e) => write!(fmt, "Serialization error occurred: {:?}", e),
         }
     }
 }

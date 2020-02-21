@@ -9,7 +9,7 @@ use legion::prelude::{Schedulable, SystemBuilder};
 use log::{debug, warn};
 use net_sync::compression::CompressionStrategy;
 use std::{io, io::Read};
-use track::serialisation::SerialisationStrategy;
+use track::serialization::SerializationStrategy;
 
 pub fn tcp_connection_listener() -> Box<dyn Schedulable> {
     SystemBuilder::new("tcp_connection_listener")
@@ -48,7 +48,7 @@ pub fn tcp_connection_listener() -> Box<dyn Schedulable> {
         })
 }
 
-pub fn tcp_receive_system<S: SerialisationStrategy + 'static, C: CompressionStrategy + 'static>(
+pub fn tcp_receive_system<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
 ) -> Box<dyn Schedulable> {
     SystemBuilder::new("tcp_receive_system")
         .write_resource::<TcpListenerResource>()
@@ -90,7 +90,7 @@ pub fn tcp_receive_system<S: SerialisationStrategy + 'static, C: CompressionStra
                                     .decompress(&recv_buffer[..recv_len]) {
                                     Ok(decompressed) => {
                                         match unpacker
-                                            .serialisation()
+                                            .serialization()
                                             .deserialize::<Vec<NetworkPacket>>(&decompressed)  {
                                             Ok(deserialized) => {
                                                 let _ = deserialized.into_iter()
@@ -142,7 +142,7 @@ pub fn tcp_receive_system<S: SerialisationStrategy + 'static, C: CompressionStra
         })
 }
 
-pub fn tcp_sent_system<S: SerialisationStrategy + 'static, C: CompressionStrategy + 'static>(
+pub fn tcp_sent_system<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
 ) -> Box<dyn Schedulable> {
     SystemBuilder::new("tcp_sent_system")
         .write_resource::<TcpClientResource>()
@@ -159,7 +159,7 @@ pub fn tcp_sent_system<S: SerialisationStrategy + 'static, C: CompressionStrateg
                 .map(|message| NetworkPacket::new(message.identifier, message.event))
                 .collect::<Vec<NetworkPacket>>();
 
-            match &packer.serialisation().serialize(&data) {
+            match &packer.serialization().serialize(&data) {
                 Ok(serialized) => {
                     let compressed = packer.compression().compress(&serialized);
 

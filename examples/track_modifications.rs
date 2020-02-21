@@ -1,12 +1,13 @@
 use legion::prelude::{
     any, IntoQuery, Read, Resources, Schedulable, Schedule, SystemBuilder, Universe,
 };
-use legion_sync::components::UidComponent;
-use legion_sync::resources::{EventResource, SentBufferResource};
-use legion_sync::systems::track_modifications_system;
+use legion_sync::{
+    components::UidComponent,
+    resources::{EventResource, SentBufferResource},
+    systems::track_modifications_system,
+};
 use net_sync::uid::UidAllocator;
-use std::thread;
-use std::time::Duration;
+use std::{thread, time::Duration};
 use track::preclude::*;
 
 #[track]

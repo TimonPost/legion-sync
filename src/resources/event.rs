@@ -6,7 +6,10 @@ use track::{
 };
 
 use crate::{components::UidComponent, resources::SentBufferResource};
-use legion::prelude::Entity;
+use legion::{
+    filter::EntityFilter,
+    prelude::{any, Entity, World},
+};
 use net_sync::uid::Uid;
 
 pub struct EventResource {
@@ -40,6 +43,14 @@ impl EventResource {
 
     pub fn notifier(&self) -> &Sender<ModificationEvent<Uid>> {
         &self.modification_channel.sender()
+    }
+
+    pub fn subscribe_to_world<F: EntityFilter + Sync + 'static>(
+        &self,
+        world: &mut World,
+        filter: F,
+    ) {
+        world.subscribe(self.legion_subscriber().clone(), filter);
     }
 
     pub fn gather_events(&self, transport: &mut SentBufferResource, world: &mut SubWorld) {

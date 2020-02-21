@@ -1,15 +1,15 @@
 use net_sync::compression::{CompressionStrategy, ModificationCompressor};
-use track::serialisation::{ModificationSerializer, SerialisationStrategy};
+use track::serialization::{ModificationSerializer, SerializationStrategy};
 
-pub struct Packer<S: SerialisationStrategy, C: CompressionStrategy> {
+pub struct Packer<S: SerializationStrategy, C: CompressionStrategy> {
     compression: ModificationCompressor<C>,
-    serialisation: ModificationSerializer<S>,
+    serialization: ModificationSerializer<S>,
 }
 
-impl<S: SerialisationStrategy, C: CompressionStrategy> Packer<S, C> {
-    pub fn new(serialisation: S, compression: C) -> Packer<S, C> {
+impl<S: SerializationStrategy, C: CompressionStrategy> Packer<S, C> {
+    pub fn new(serialization: S, compression: C) -> Packer<S, C> {
         Packer {
-            serialisation: ModificationSerializer::new(serialisation),
+            serialization: ModificationSerializer::new(serialization),
             compression: ModificationCompressor::new(compression),
         }
     }
@@ -18,15 +18,15 @@ impl<S: SerialisationStrategy, C: CompressionStrategy> Packer<S, C> {
         &self.compression
     }
 
-    pub fn serialisation(&self) -> &ModificationSerializer<S> {
-        &self.serialisation
+    pub fn serialization(&self) -> &ModificationSerializer<S> {
+        &self.serialization
     }
 }
 
-impl<S: SerialisationStrategy, C: CompressionStrategy> Default for Packer<S, C> {
+impl<S: SerializationStrategy, C: CompressionStrategy> Default for Packer<S, C> {
     fn default() -> Self {
         Packer {
-            serialisation: Default::default(),
+            serialization: Default::default(),
             compression: Default::default(),
         }
     }

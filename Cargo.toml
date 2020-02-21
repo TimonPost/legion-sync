@@ -13,7 +13,7 @@ readme = "README.md"
 
 [dependencies]
 net-sync = { path = "../net-sync" }
-track = { path = "../track" }
+track = { version = "0.1.0", path = "../track" }
 
 legion = { version = "0.2.1", git = "https://github.com/TomGillen/legion", branch = "master" }
 serde = "1.0.104"

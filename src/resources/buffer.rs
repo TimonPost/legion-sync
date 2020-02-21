@@ -42,7 +42,7 @@ impl ReceiveBufferResource {
         })
     }
 
-    fn drain(&mut self, mut filter: impl FnMut(&Event, Uid) -> bool) -> Vec<ReceivedPacket> {
+    pub fn drain(&mut self, mut filter: impl FnMut(&Event, Uid) -> bool) -> Vec<ReceivedPacket> {
         let mut drained = Vec::with_capacity(self.messages.len());
         let mut i = 0;
         while i != self.messages.len() {
