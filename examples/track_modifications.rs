@@ -3,10 +3,10 @@ use legion::prelude::{
 };
 use legion_sync::{
     components::UidComponent,
-    resources::{EventResource, SentBufferResource},
+    resources::{EventResource, RegisteredComponentsResource, SentBufferResource},
     systems::track_modifications_system,
 };
-use net_sync::uid::UidAllocator;
+use net_sync::uid::Uid;
 use std::{thread, time::Duration};
 use track::preclude::*;
 
@@ -35,13 +35,11 @@ fn main() {
     let mut resources = Resources::default();
     resources.insert(SentBufferResource::new());
     resources.insert(event_resource);
+    resources.insert(RegisteredComponentsResource::new());
 
     world.insert(
         (),
-        vec![(
-            Position { x: 1, y: 1 },
-            UidComponent::new(UidAllocator::new().allocate(Some(1))),
-        )],
+        vec![(Position { x: 1, y: 1 }, UidComponent::new(Uid(1)))],
     );
 
     let mut scheduler = Schedule::builder()

@@ -1,12 +1,15 @@
 //! A number of components that can be used to synchronize and trace components.
 
+use crate::tracking::Bincode;
 use net_sync::uid::Uid;
+use serde::{Deserialize, Serialize};
 use std::ops::{Deref, DerefMut};
 
 /// A component with a random `UUID`.
 ///
 /// If modifications are serialized we need to know from which component they came.
 /// With this component you can identify your entity.
+#[derive(Debug, Clone, Copy, PartialOrd, PartialEq, Serialize, Deserialize)]
 pub struct UidComponent {
     uid: Uid,
 }
@@ -35,3 +38,11 @@ impl DerefMut for UidComponent {
         &mut self.uid
     }
 }
+
+impl Default for UidComponent {
+    fn default() -> Self {
+        UidComponent { uid: Uid(0) }
+    }
+}
+
+crate::register_component_type!(UidComponent, Bincode);

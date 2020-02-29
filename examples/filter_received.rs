@@ -3,7 +3,6 @@ use legion_sync::{
     components::UidComponent,
     filters::filter_fns::{all, modified, removed},
     resources::{ReceiveBufferResource, TrackResource},
-    systems::track_modifications_system,
 };
 use net_sync::uid::UidAllocator;
 

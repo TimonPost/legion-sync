@@ -3,7 +3,7 @@ use crate::{
         tcp::{TcpClientResource, TcpListenerResource},
         BufferResource, Packer, ReceiveBufferResource, SentBufferResource, TrackResource,
     },
-    Event, NetworkPacket, ReceivedPacket,
+    Event, ReceivedPacket, SentPacket,
 };
 use legion::prelude::{Schedulable, SystemBuilder};
 use log::{debug, warn};
@@ -43,8 +43,6 @@ pub fn tcp_connection_listener() -> Box<dyn Schedulable> {
 
                 resources.add_stream(addr, stream);
             }
-
-            debug!("tcp_connection_listener");
         })
 }
 
@@ -79,7 +77,7 @@ pub fn tcp_receive_system<S: SerializationStrategy + 'static, C: CompressionStra
 
                     match result {
                         Ok(recv_len) => {
-                            if recv_len > 0 {
+                            if recv_len > 5 {
                                 debug!(
                                     "Received {} bytes from TCP stream: {:?}.",
                                     recv_len, peer_addr
@@ -91,20 +89,21 @@ pub fn tcp_receive_system<S: SerializationStrategy + 'static, C: CompressionStra
                                     Ok(decompressed) => {
                                         match unpacker
                                             .serialization()
-                                            .deserialize::<Vec<NetworkPacket>>(&decompressed)  {
+                                            .deserialize::<Vec<SentPacket>>(&decompressed)  {
                                             Ok(deserialized) => {
                                                 let _ = deserialized.into_iter()
                                                     .map(|p| {
-                                                        let id = p.identifier().0 as usize;
+                                                        let entity_id = p.identifier().0 as usize;
                                                         match p.event() {
                                                             Event::Inserted(_) => {
-                                                                tracker.insert(id);
+                                                                tracker.insert(entity_id);
                                                             }
                                                             Event::Modified(_) => {
-                                                                tracker.modify(id);
+                                                                debug!("!!!modified");
+                                                                tracker.modify(entity_id);
                                                             }
                                                             Event::Removed => {
-                                                                tracker.remove(id);
+                                                                tracker.remove(entity_id);
                                                             }
                                                         }
 
@@ -156,8 +155,8 @@ pub fn tcp_sent_system<S: SerializationStrategy + 'static, C: CompressionStrateg
             let data = sent_buffer
                 .drain_messages(|_| true)
                 .into_iter()
-                .map(|message| NetworkPacket::new(message.identifier, message.event))
-                .collect::<Vec<NetworkPacket>>();
+                .map(|message| SentPacket::new(message.identifier(), message.event()))
+                .collect::<Vec<SentPacket>>();
 
             match &packer.serialization().serialize(&data) {
                 Ok(serialized) => {

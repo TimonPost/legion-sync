@@ -5,10 +5,14 @@ use track::{
     ModificationChannel, ModificationEvent,
 };
 
-use crate::{components::UidComponent, resources::SentBufferResource};
+use crate::{
+    components::UidComponent,
+    resources::{RegisteredComponentsResource, SentBufferResource},
+    transport::ComponentRecord,
+};
 use legion::{
     filter::EntityFilter,
-    prelude::{any, Entity, World},
+    prelude::{Entity, World},
 };
 use net_sync::uid::Uid;
 
@@ -53,26 +57,46 @@ impl EventResource {
         world.subscribe(self.legion_subscriber().clone(), filter);
     }
 
-    pub fn gather_events(&self, transport: &mut SentBufferResource, world: &mut SubWorld) {
-        for event in self.legion_events() {
-            match event {
-                Event::EntityInserted(entity, chunk_id) => {
+    pub fn gather_events(
+        &self,
+        transport: &mut SentBufferResource,
+        components: &RegisteredComponentsResource,
+        world: &mut SubWorld,
+    ) {
+        for legion_event in self.legion_events() {
+            match legion_event {
+                Event::EntityInserted(entity, _chunk_id) => {
+                    let mut serialized_components: Vec<ComponentRecord> = Vec::new();
+
+                    for component in components.slice().iter() {
+                        let serialization = component
+                            .1
+                            .serialize_if_in_entity(world, entity)
+                            .unwrap()
+                            .unwrap();
+                        let record = ComponentRecord::new(component.0.id(), serialization);
+                        serialized_components.push(record);
+                    }
+
                     let identifier = get_identifier_component(world, entity);
-                    transport.send_immediate(identifier, crate::event::Event::Inserted(vec![]));
+                    transport.send_immediate(
+                        identifier,
+                        crate::event::Event::Inserted(serialized_components),
+                    );
                 }
                 Event::EntityRemoved(entity, _) => {
                     let identifier = get_identifier_component(world, entity);
 
                     transport.send_immediate(identifier, crate::event::Event::Removed);
                 }
-                _ => {}
+                _ => { /*modified events are handled below */ }
             }
         }
 
-        for event in self.changed_components() {
+        for modified in self.changed_components() {
             transport.send(
-                event.identifier,
-                crate::event::Event::Modified(event.modified_fields),
+                modified.identifier,
+                crate::event::Event::Modified(modified.modified_fields),
             );
         }
     }

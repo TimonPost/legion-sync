@@ -54,23 +54,24 @@ pub struct ModifiedFilter;
 pub trait TrackResourceFilter: Send + Sync + Clone {
     fn filter(&self, resource: &TrackResource, identifier: usize) -> bool;
 }
+
 impl TrackResourceFilter for AllFilter {
     fn filter(&self, resource: &TrackResource, identifier: usize) -> bool {
         resource.removed.contains(identifier)
-            || return resource.inserted.contains(identifier)
-                || return resource.modified.contains(identifier)
+            || resource.inserted.contains(identifier)
+            || resource.modified.contains(identifier)
     }
 }
 
 impl TrackResourceFilter for RemovedFilter {
     fn filter(&self, resource: &TrackResource, identifier: usize) -> bool {
-        return resource.removed.contains(identifier);
+        resource.removed.contains(identifier)
     }
 }
 
 impl TrackResourceFilter for ModifiedFilter {
     fn filter(&self, resource: &TrackResource, identifier: usize) -> bool {
-        return resource.modified.contains(identifier);
+        resource.modified.contains(identifier)
     }
 }
 
@@ -141,5 +142,147 @@ impl<'a, F: TrackResourceFilter> std::ops::BitOr<Passthrough> for TrackFilter<'_
     #[inline]
     fn bitor(self, _: Passthrough) -> Self::Output {
         self
+    }
+}
+
+#[cfg(test)]
+pub mod test {
+    use crate::{
+        components::UidComponent,
+        filters::{
+            filter_fns::{all, modified, removed},
+            AllFilter, ModifiedFilter, RemovedFilter, TrackResourceFilter,
+        },
+        resources::TrackResource,
+    };
+    use legion::prelude::{IntoQuery, Read, Schedulable, Schedule, SystemBuilder, Universe, World};
+    use net_sync::uid::Uid;
+
+    #[test]
+    fn all_filter_should_pass_test() {
+        let mut resource = TrackResource::new();
+        resource.insert(1);
+        resource.remove(1);
+        resource.modify(1);
+
+        assert_eq!(AllFilter.filter(&resource, 1), true);
+    }
+
+    #[test]
+    fn modified_filter_should_pass_test() {
+        let mut resource = TrackResource::new();
+        resource.modify(1);
+
+        assert_eq!(ModifiedFilter.filter(&resource, 1), true);
+    }
+
+    #[test]
+    fn removed_filter_should_pass_test() {
+        let mut resource = TrackResource::new();
+        resource.remove(1);
+
+        assert_eq!(RemovedFilter.filter(&resource, 1), true);
+    }
+
+    #[test]
+    fn all_filter_should_fail_test() {
+        let mut resource = TrackResource::new();
+        assert_eq!(AllFilter.filter(&resource, 1), false);
+    }
+
+    #[test]
+    fn modified_filter_should_fail_test() {
+        let mut resource = TrackResource::new();
+        assert_eq!(ModifiedFilter.filter(&resource, 1), false);
+    }
+
+    #[test]
+    fn removed_filter_should_fail_test() {
+        let mut resource = TrackResource::new();
+        assert_eq!(RemovedFilter.filter(&resource, 1), false);
+    }
+
+    #[test]
+    fn filter_modified_query() {
+        let (universe, world) = get_world();
+
+        let query = <Read<UidComponent>>::query();
+
+        let mut track_resource = TrackResource::new();
+        track_resource.modify(1);
+
+        let empty_resource = TrackResource::new();
+
+        // 1) Filter and query modified components and retrieve the packets for those.
+        let pass_query = query.clone().filter(modified(&track_resource));
+
+        for modified in pass_query.iter(&world) {
+            assert_eq!(modified.uid().id(), 1);
+        }
+
+        let empty_query = query.clone().filter(modified(&empty_resource));
+
+        for modified in empty_query.iter(&world) {
+            assert!(false);
+        }
+    }
+
+    #[test]
+    fn filter_removed_query() {
+        let (universe, world) = get_world();
+
+        let query = <Read<UidComponent>>::query();
+
+        let mut track_resource = TrackResource::new();
+        track_resource.remove(1);
+
+        let empty_resource = TrackResource::new();
+
+        // 1) Filter and query modified components and retrieve the packets for those.
+        let pass_query = query.clone().filter(removed(&track_resource));
+
+        for modified in pass_query.iter(&world) {
+            assert_eq!(modified.uid().id(), 1);
+        }
+
+        let empty_query = query.clone().filter(removed(&empty_resource));
+
+        for modified in empty_query.iter(&world) {
+            assert!(false);
+        }
+    }
+
+    #[test]
+    fn filter_all_query() {
+        let (universe, world) = get_world();
+
+        let query = <Read<UidComponent>>::query();
+
+        let mut track_resource = TrackResource::new();
+        track_resource.insert(1);
+
+        let empty_resource = TrackResource::new();
+
+        // 1) Filter and query modified components and retrieve the packets for those.
+        let pass_query = query.clone().filter(all(&track_resource));
+
+        for modified in pass_query.iter(&world) {
+            assert_eq!(modified.uid().id(), 1);
+        }
+
+        let empty_query = query.clone().filter(all(&empty_resource));
+
+        for modified in empty_query.iter(&world) {
+            assert!(false);
+        }
+    }
+
+    fn get_world() -> (Universe, World) {
+        let universe = Universe::new();
+        let mut world = universe.create_world();
+
+        world.insert((), vec![(UidComponent::new(Uid(1)),)]);
+
+        (universe, world)
     }
 }

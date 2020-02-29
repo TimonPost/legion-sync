@@ -4,7 +4,7 @@ use crate::{Event, Message, ReceivedPacket, UrgencyRequirement};
 use net_sync::uid::Uid;
 
 pub struct BufferResource {
-    pub recv_buffer: Vec<u8>,
+    pub(crate) recv_buffer: Vec<u8>,
 }
 
 impl BufferResource {
@@ -12,6 +12,10 @@ impl BufferResource {
         BufferResource {
             recv_buffer: vec![0; size],
         }
+    }
+
+    pub fn buffer(&self) -> &[u8] {
+        &self.recv_buffer
     }
 }
 
@@ -22,21 +26,21 @@ pub struct ReceiveBufferResource {
 
 impl ReceiveBufferResource {
     pub fn drain_modified(&mut self) -> Vec<ReceivedPacket> {
-        self.drain(|event, id| match event {
+        self.drain(|event, _id| match event {
             Event::Modified(_) => true,
             _ => false,
         })
     }
 
     pub fn drain_removed(&mut self) -> Vec<ReceivedPacket> {
-        self.drain(|event, id| match event {
+        self.drain(|event, _id| match event {
             Event::Removed => true,
             _ => false,
         })
     }
 
     pub fn drain_inserted(&mut self) -> Vec<ReceivedPacket> {
-        self.drain(|event, id| match event {
+        self.drain(|event, _id| match event {
             Event::Inserted(_) => true,
             _ => false,
         })
@@ -127,7 +131,7 @@ impl SentBufferResource {
         mut filter: impl FnMut(&mut Message) -> bool,
     ) -> Vec<Message> {
         self.drain_messages(|message| {
-            message.urgency == UrgencyRequirement::Immediate || filter(message)
+            message.urgency() == UrgencyRequirement::Immediate || filter(message)
         })
     }
 
@@ -162,36 +166,38 @@ impl Default for SentBufferResource {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{components::UidComponent, SentPacket};
+    use std::net::SocketAddr;
 
     #[test]
     fn test_send_with_default_requirements() {
         let mut resource = create_test_resource();
 
-        resource.send(test_payload());
+        resource.send(Uid(0), Event::Removed);
 
         let packet = &resource.messages[0];
 
         assert_eq!(resource.messages.len(), 1);
-        assert_eq!(packet.urgency, UrgencyRequirement::OnTick);
+        assert_eq!(packet.urgency(), UrgencyRequirement::OnTick);
     }
 
     #[test]
     fn test_send_immediate_message() {
         let mut resource = create_test_resource();
 
-        resource.send_immediate(test_payload());
+        resource.send_immediate(Uid(0), Event::Modified(test_payload().to_vec()));
 
         let packet = &resource.messages[0];
 
         assert_eq!(resource.messages.len(), 1);
-        assert_eq!(packet.urgency, UrgencyRequirement::Immediate);
+        assert_eq!(packet.urgency(), UrgencyRequirement::Immediate);
     }
 
     #[test]
     fn test_has_messages() {
         let mut resource = create_test_resource();
         assert_eq!(resource.has_messages(), false);
-        resource.send_immediate(test_payload());
+        resource.send_immediate(Uid(0), Event::Modified(test_payload().to_vec()));
         assert_eq!(resource.has_messages(), true);
     }
 
@@ -199,15 +205,54 @@ mod tests {
     fn test_drain_only_immediate_messages() {
         let mut resource = create_test_resource();
 
-        let addr = "127.0.0.1:3000".parse().unwrap();
-        resource.send_immediate(test_payload());
-        resource.send_immediate(test_payload());
-        resource.send(test_payload());
-        resource.send(test_payload());
-        resource.send_immediate(test_payload());
+        let addr = "127.0.0.1:3000".parse::<SocketAddr>().unwrap();
+        resource.send_immediate(Uid(0), Event::Modified(test_payload().to_vec()));
+        resource.send_immediate(Uid(0), Event::Modified(test_payload().to_vec()));
+        resource.send(Uid(0), Event::Removed);
+        resource.send(Uid(0), Event::Removed);
+        resource.send_immediate(Uid(0), Event::Modified(test_payload().to_vec()));
 
         assert_eq!(resource.drain_messages_to_send(|_| false).len(), 3);
         assert_eq!(resource.drain_messages_to_send(|_| false).len(), 0);
+    }
+
+    #[test]
+    fn drain_removed_events() {
+        let mut buffer = ReceiveBufferResource::default();
+        packets().into_iter().for_each(|f| buffer.push(f));
+
+        assert_eq!(buffer.drain_removed().len(), 1);
+        assert_eq!(buffer.drain_removed().len(), 0);
+    }
+
+    #[test]
+    fn drain_inserted_events() {
+        let mut buffer = ReceiveBufferResource::default();
+        packets().into_iter().for_each(|f| buffer.push(f));
+
+        assert_eq!(buffer.drain_inserted().len(), 2);
+        assert_eq!(buffer.drain_inserted().len(), 0);
+    }
+
+    #[test]
+    fn drain_modified_events() {
+        let mut buffer = ReceiveBufferResource::default();
+        packets().into_iter().for_each(|f| buffer.push(f));
+
+        assert_eq!(buffer.drain_modified().len(), 3);
+        assert_eq!(buffer.drain_modified().len(), 0);
+    }
+
+    fn packets() -> Vec<ReceivedPacket> {
+        let addr = "127.0.0.1:1234".parse().unwrap();
+        vec![
+            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::Removed)),
+            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::Inserted(vec![]))),
+            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::Inserted(vec![]))),
+            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::Modified(vec![]))),
+            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::Modified(vec![]))),
+            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::Modified(vec![]))),
+        ]
     }
 
     fn test_payload() -> &'static [u8] {
