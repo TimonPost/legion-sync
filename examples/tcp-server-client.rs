@@ -1,4 +1,4 @@
-use legion::{filter::filter_fns::any, prelude::*};
+use legion::{filter::filter_fns::any, prelude::*, systems::schedule::Builder};
 use legion_sync::systems::insert_received_entities_system;
 use legion_sync::{
     components::UidComponent,
@@ -6,7 +6,7 @@ use legion_sync::{
     resources::{
         tcp::{TcpClientResource, TcpListenerResource},
         BufferResource, EventResource, Packer, ReceiveBufferResource, RegisteredComponentsResource,
-        SentBufferResource, TrackResource, ResourcesExt
+        ResourcesExt, SentBufferResource, TrackResource,
     },
     systems::{
         tcp::{tcp_connection_listener, tcp_receive_system, tcp_sent_system},
@@ -111,11 +111,10 @@ fn start_client() -> JoinHandle<()> {
 /// Initializes the systems needed for TCP network communication receiving entity updates.
 fn initialize_server_systems() -> Schedule {
     Schedule::builder()
-        .add_system(tcp_connection_listener())
-        .add_system(tcp_receive_system::<Bincode, Lz4>())
+        .add_tcp_listener_systems(Bincode, Lz4)
+        .add_server_systems()
         .add_system(apply_position_modifications_system())
         .add_system(remove_entities_system())
-        .add_system(insert_received_entities_system())
         .flush()
         .build()
 }
@@ -123,7 +122,7 @@ fn initialize_server_systems() -> Schedule {
 /// Initializes the systems needed for TCP network communication and entity client sync with server.
 fn initialize_client_systems() -> Schedule {
     Schedule::builder()
-        .add_system(track_modifications_system())
+        .add_client_systems()
         .add_system(tcp_sent_system::<Bincode, Lz4>())
         .add_system(make_modification_system())
         .flush()

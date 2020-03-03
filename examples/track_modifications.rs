@@ -5,7 +5,7 @@ use legion_sync::{
     components::UidComponent,
     resources::{EventResource, RegisteredComponentsResource, SentBufferResource},
     systems::track_modifications_system,
-    tracking::*
+    tracking::*,
 };
 use net_sync::uid::Uid;
 use std::{thread, time::Duration};

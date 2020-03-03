@@ -1,14 +1,20 @@
 use crate::{components::UidComponent, resources::TrackResource};
 use legion::{
     filter::*,
+    iterator::SliceVecIter,
     storage::{ComponentResourceSet, ComponentStorage, ComponentTypeId},
 };
+use std::collections::{HashMap, HashSet};
 use std::slice::Iter;
 
 pub mod filter_fns {
     use super::{ModifiedFilter, RemovedFilter, TrackFilter};
+    use crate::filters::RegisteredComponentFilter;
+    use crate::register::ComponentRegister;
+    use crate::tracking::ComponentTypeId;
     use crate::{filters::AllFilter, resources::TrackResource};
     use legion::filter::{EntityFilterTuple, Passthrough};
+    use std::collections::{HashMap, HashSet};
 
     pub fn all<'a>(
         cash: &'a TrackResource,
@@ -41,6 +47,19 @@ pub mod filter_fns {
             Passthrough,
             Passthrough,
             TrackFilter::<RemovedFilter>::new(cash, RemovedFilter),
+        )
+    }
+
+    pub fn registered() -> EntityFilterTuple<RegisteredComponentFilter, Passthrough, Passthrough> {
+        let registered_components = ComponentRegister::by_component_id()
+            .iter()
+            .map(|(k, v)| *k)
+            .collect::<HashSet<ComponentTypeId>>();
+
+        EntityFilterTuple::new(
+            RegisteredComponentFilter::new(registered_components),
+            Passthrough,
+            Passthrough,
         )
     }
 }
@@ -145,8 +164,68 @@ impl<'a, F: TrackResourceFilter> std::ops::BitOr<Passthrough> for TrackFilter<'_
     }
 }
 
+#[derive(Debug)]
+pub struct RegisteredComponentFilter(HashSet<ComponentTypeId>);
+
+impl RegisteredComponentFilter {
+    fn new(registered_components: HashSet<ComponentTypeId>) -> Self {
+        RegisteredComponentFilter(registered_components)
+    }
+}
+
+impl ActiveFilter for RegisteredComponentFilter {}
+
+impl Clone for RegisteredComponentFilter {
+    fn clone(&self) -> Self {
+        RegisteredComponentFilter(self.0.clone())
+    }
+}
+
+impl<'a> Filter<ArchetypeFilterData<'a>> for RegisteredComponentFilter {
+    type Iter = SliceVecIter<'a, ComponentTypeId>;
+
+    #[inline]
+    fn collect(&self, source: ArchetypeFilterData<'a>) -> Self::Iter {
+        source.component_types.iter()
+    }
+
+    #[inline]
+    fn is_match(&self, item: &<Self::Iter as Iterator>::Item) -> Option<bool> {
+        for i in item.iter() {
+            if self.0.contains(i) {
+                return Some(true);
+            }
+        }
+
+        return Some(false);
+    }
+}
+
+impl std::ops::Not for RegisteredComponentFilter {
+    type Output = Not<Self>;
+
+    #[inline]
+    fn not(self) -> Self::Output {
+        Not { filter: self }
+    }
+}
+
+impl<'a, Rhs: ActiveFilter> std::ops::BitAnd<Rhs> for RegisteredComponentFilter {
+    type Output = And<(Self, Rhs)>;
+
+    #[inline]
+    fn bitand(self, rhs: Rhs) -> Self::Output {
+        And {
+            filters: (self, rhs),
+        }
+    }
+}
+
 #[cfg(test)]
 pub mod test {
+    use crate::filters::filter_fns::registered;
+    use crate::filters::RegisteredComponentFilter;
+    use crate::tracking::ComponentTypeId;
     use crate::{
         components::UidComponent,
         filters::{
@@ -155,8 +234,10 @@ pub mod test {
         },
         resources::TrackResource,
     };
+    use legion::filter::*;
     use legion::prelude::{IntoQuery, Read, Universe, World};
     use net_sync::uid::Uid;
+    use std::collections::HashSet;
 
     #[test]
     fn all_filter_should_pass_test() {
@@ -275,6 +356,49 @@ pub mod test {
         for modified in empty_query.iter(&world) {
             assert!(false);
         }
+    }
+
+    #[test]
+    fn filter_registered_components() {
+        struct A;
+        struct B;
+        struct C;
+
+        let (universe, mut world) = get_world();
+
+        world.insert((), vec![(A,)]);
+        world.insert((), vec![(B,)]);
+        world.insert((), vec![(C,)]);
+
+        let mut registered = HashSet::new();
+        registered.insert(ComponentTypeId::of::<A>());
+        registered.insert(ComponentTypeId::of::<B>());
+
+        let filter = EntityFilterTuple::new(
+            RegisteredComponentFilter::new(registered),
+            Passthrough,
+            Passthrough,
+        );
+
+        let a_query = <Read<A>>::query().filter(filter.clone());
+        let b_query = <Read<B>>::query().filter(filter.clone());
+        let c_query = <Read<C>>::query().filter(filter.clone());
+
+        let mut count = 0;
+
+        for component in a_query.iter(&world) {
+            count += 1;
+        }
+
+        for component in b_query.iter(&world) {
+            count += 1;
+        }
+
+        for component in c_query.iter(&world) {
+            count += 1;
+        }
+
+        assert_eq!(count, 2);
     }
 
     fn get_world() -> (Universe, World) {

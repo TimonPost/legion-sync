@@ -1,11 +1,17 @@
 //! A number of systems that can be used to synchronize and trace components.
 
-use legion::prelude::{Schedulable, SystemBuilder};
+use legion::{
+    prelude::{Schedulable, SystemBuilder},
+    systems::schedule::Builder,
+};
 
 use crate::resources::{
     EventResource, ReceiveBufferResource, RegisteredComponentsResource, SentBufferResource,
 };
+use crate::systems::tcp::tcp_sent_system;
+use crate::tracking::SerializationStrategy;
 use crate::{Event, ReceivedPacket};
+use net_sync::compression::CompressionStrategy;
 use net_sync::uid::Uid;
 
 pub mod tcp;
@@ -72,4 +78,56 @@ pub fn insert_received_entities_system() -> Box<dyn Schedulable> {
                 }
             }
         })
+}
+
+pub trait SchedulerExt {
+    fn add_server_systems(self) -> Builder;
+    fn add_client_systems(self) -> Builder;
+    fn add_required_systems(self) -> Builder;
+    fn add_tcp_listener_systems<
+        S: SerializationStrategy + 'static,
+        C: CompressionStrategy + 'static,
+    >(
+        self,
+    ) -> Builder;
+    fn add_tcp_client_systems<
+        S: SerializationStrategy + 'static,
+        C: CompressionStrategy + 'static,
+    >(
+        self,
+    ) -> Builder;
+}
+
+impl SchedulerExt for Builder {
+    fn add_server_systems(mut self) -> Builder {
+        self.add_system(insert_received_entities_system())
+    }
+
+    fn add_client_systems(mut self) -> Builder {
+        self.add_system(track_modifications_system())
+    }
+
+    fn add_required_systems(mut self) -> Builder {
+        // TODO: future use
+        self
+    }
+
+    fn add_tcp_listener_systems<
+        S: SerializationStrategy + 'static,
+        C: CompressionStrategy + 'static,
+    >(
+        mut self,
+    ) -> Builder {
+        self.add_system(tcp::tcp_connection_listener())
+            .add_system(tcp::tcp_receive_system::<S, C>())
+    }
+
+    fn add_tcp_client_systems<
+        S: SerializationStrategy + 'static,
+        C: CompressionStrategy + 'static,
+    >(
+        mut self,
+    ) -> Builder {
+        self.add_system(tcp_sent_system::<S, C>())
+    }
 }
