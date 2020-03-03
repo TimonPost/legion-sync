@@ -50,10 +50,9 @@ pub mod test {
     #[test]
     fn create_sent_packet_test() {
         let id = Uid(0);
-        let event = Event::EntityRemoved;
+        let event = Event::EntityRemoved(id);
 
-        let packet = SentPacket::new(id, event.clone());
-        assert_eq!(*packet.identifier(), id);
+        let packet = SentPacket::new(event.clone());
         assert_eq!(packet.event(), &event);
     }
 }

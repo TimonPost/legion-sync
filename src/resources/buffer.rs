@@ -27,7 +27,9 @@ pub struct ReceiveBufferResource {
 impl ReceiveBufferResource {
     pub fn drain_modified(&mut self, entity_id: Uid, register_id: Uid) -> Vec<ReceivedPacket> {
         self.drain(|event| match event {
-            Event::ComponentModified(_entity_id, record) => *_entity_id == entity_id && record.register_id() == register_id.0,
+            Event::ComponentModified(_entity_id, record) => {
+                *_entity_id == entity_id && record.register_id() == register_id.0
+            }
             _ => false,
         })
     }
@@ -166,14 +168,14 @@ impl Default for SentBufferResource {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{components::UidComponent, SentPacket};
+    use crate::{ComponentRecord, SentPacket};
     use std::net::SocketAddr;
 
     #[test]
     fn test_send_with_default_requirements() {
         let mut resource = create_test_resource();
 
-        resource.send(Uid(0), Event::EntityRemoved);
+        resource.send(remove_event());
 
         let packet = &resource.messages[0];
 
@@ -185,7 +187,7 @@ mod tests {
     fn test_send_immediate_message() {
         let mut resource = create_test_resource();
 
-        resource.send_immediate(Uid(0), Event::ComponentModified(test_payload().to_vec()));
+        resource.send_immediate(modify_event());
 
         let packet = &resource.messages[0];
 
@@ -197,7 +199,7 @@ mod tests {
     fn test_has_messages() {
         let mut resource = create_test_resource();
         assert_eq!(resource.has_messages(), false);
-        resource.send_immediate(Uid(0), Event::ComponentModified(test_payload().to_vec()));
+        resource.send_immediate(modify_event());
         assert_eq!(resource.has_messages(), true);
     }
 
@@ -206,11 +208,11 @@ mod tests {
         let mut resource = create_test_resource();
 
         let addr = "127.0.0.1:3000".parse::<SocketAddr>().unwrap();
-        resource.send_immediate(Uid(0), Event::ComponentModified(test_payload().to_vec()));
-        resource.send_immediate(Uid(0), Event::ComponentModified(test_payload().to_vec()));
-        resource.send(Uid(0), Event::EntityRemoved);
-        resource.send(Uid(0), Event::EntityRemoved);
-        resource.send_immediate(Uid(0), Event::ComponentModified(test_payload().to_vec()));
+        resource.send_immediate(modify_event());
+        resource.send_immediate(modify_event());
+        resource.send(remove_event());
+        resource.send(remove_event());
+        resource.send_immediate(modify_event());
 
         assert_eq!(resource.drain_messages_to_send(|_| false).len(), 3);
         assert_eq!(resource.drain_messages_to_send(|_| false).len(), 0);
@@ -239,20 +241,53 @@ mod tests {
         let mut buffer = ReceiveBufferResource::default();
         packets().into_iter().for_each(|f| buffer.push(f));
 
-        assert_eq!(buffer.drain_modified().len(), 3);
-        assert_eq!(buffer.drain_modified().len(), 0);
+        // There are three modification events.
+        assert_eq!(buffer.drain_modified(Uid(0), Uid(2)).len(), 2);
+        assert_eq!(buffer.drain_modified(Uid(0), Uid(1)).len(), 1);
+
+        // Everything should be drained.
+        assert_eq!(buffer.drain_modified(Uid(0), Uid(1)).len(), 0);
+        assert_eq!(buffer.drain_modified(Uid(0), Uid(2)).len(), 0);
     }
 
     fn packets() -> Vec<ReceivedPacket> {
         let addr = "127.0.0.1:1234".parse().unwrap();
+        let id = Uid(0);
+
         vec![
-            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::EntityRemoved)),
-            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::EntityInserted(vec![]))),
-            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::EntityInserted(vec![]))),
-            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::ComponentModified(vec![]))),
-            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::ComponentModified(vec![]))),
-            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::ComponentModified(vec![]))),
+            ReceivedPacket::new(addr, SentPacket::new(Event::EntityRemoved(id))),
+            ReceivedPacket::new(addr, SentPacket::new(Event::EntityInserted(id, vec![]))),
+            ReceivedPacket::new(addr, SentPacket::new(Event::EntityInserted(id, vec![]))),
+            ReceivedPacket::new(
+                addr,
+                SentPacket::new(Event::ComponentModified(
+                    id,
+                    ComponentRecord::new(1, vec![]),
+                )),
+            ),
+            ReceivedPacket::new(
+                addr,
+                SentPacket::new(Event::ComponentModified(
+                    id,
+                    ComponentRecord::new(2, vec![]),
+                )),
+            ),
+            ReceivedPacket::new(
+                addr,
+                SentPacket::new(Event::ComponentModified(
+                    id,
+                    ComponentRecord::new(2, vec![]),
+                )),
+            ),
         ]
+    }
+
+    fn modify_event() -> Event {
+        Event::ComponentModified(Uid(0), ComponentRecord::new(0, test_payload().to_vec()))
+    }
+
+    fn remove_event() -> Event {
+        Event::EntityRemoved(Uid(0))
     }
 
     fn test_payload() -> &'static [u8] {

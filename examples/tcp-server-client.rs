@@ -1,4 +1,5 @@
 use legion::{filter::filter_fns::any, prelude::*};
+use legion_sync::systems::insert_received_entities_system;
 use legion_sync::{
     components::UidComponent,
     filters::filter_fns::{all, modified, removed},
@@ -11,6 +12,7 @@ use legion_sync::{
         tcp::{tcp_connection_listener, tcp_receive_system, tcp_sent_system},
         track_modifications_system,
     },
+    tracking::*,
     ReceivedPacket,
 };
 use net_sync::{
@@ -23,9 +25,8 @@ use std::{
     thread::JoinHandle,
     time::Duration,
 };
-use track::{preclude::*, Apply};
 
-#[track]
+#[sync]
 #[derive(Debug)]
 pub struct Position {
     pub x: u16,
@@ -39,12 +40,18 @@ impl Position {
     }
 }
 
+impl Default for Position {
+    fn default() -> Self {
+        Position { x: 0, y: 0 }
+    }
+}
+
 fn main() {
     start_server();
     start_client().join();
 }
 
-/// Start and initialize the legion server logica.
+/// Start and initialize the legion server logic.
 fn start_server() {
     thread::spawn(|| {
         let universe = Universe::new();
@@ -61,18 +68,19 @@ fn start_server() {
         resources.insert(TcpListenerResource::new(Some(listener)));
         resources.insert(Packer::<Bincode, Lz4>::default());
         resources.insert(BufferResource::from_capacity(1500));
+        resources.insert(RegisteredComponentsResource::new());
 
         let mut schedule = initialize_server_systems();
 
         loop {
             schedule.execute(&mut world, &mut resources);
 
-            thread::sleep(Duration::from_millis(10));
+            thread::sleep(Duration::from_millis(0));
         }
     });
 }
 
-/// Start and initialize the legion client logica.
+/// Start and initialize the legion client logic.
 fn start_client() -> JoinHandle<()> {
     thread::spawn(|| {
         let universe = Universe::new();
@@ -101,7 +109,7 @@ fn start_client() -> JoinHandle<()> {
 
         loop {
             schedule.execute(&mut world, &mut resources);
-            thread::sleep(Duration::from_millis(10));
+            thread::sleep(Duration::from_millis(20));
         }
     })
 }
@@ -111,7 +119,9 @@ fn initialize_server_systems() -> Schedule {
     Schedule::builder()
         .add_system(tcp_connection_listener())
         .add_system(tcp_receive_system::<Bincode, Lz4>())
-        .add_system(receive_system::<Bincode, Lz4>())
+        .add_system(apply_position_modifications_system())
+        .add_system(remove_entities_system())
+        .add_system(insert_received_entities_system())
         .flush()
         .build()
 }
@@ -126,59 +136,51 @@ fn initialize_client_systems() -> Schedule {
         .build()
 }
 
-/// Basic example of reading received entity synchronization data.
-pub fn receive_system<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
-) -> Box<dyn Schedulable> {
+pub fn remove_entities_system() -> Box<dyn Schedulable> {
     SystemBuilder::new("read_received_system")
         .write_resource::<ReceiveBufferResource>()
         .write_resource::<TrackResource>()
-        .read_resource::<Packer<S, C>>()
-        .with_query(<(legion::prelude::Write<Position>, Read<UidComponent>)>::query())
-        .build(|command_buffer, mut world, resources, query| {
-            /// 1) Filter and query modified components and retrieve the packets for those.
-            let filter = query.clone().filter(modified(&resources.1));
-            let modified_packets: Vec<ReceivedPacket> = resources.0.drain_modified();
+        .with_query(<(Read<UidComponent>, legion::prelude::Write<Position>)>::query())
+        .build(|command_buffer, mut world, resource, query| {
+            let filter = query.clone().filter(removed(&resource.1));
+            let removed_packets: Vec<ReceivedPacket> = resource.0.drain_removed();
 
-            for (mut pos, identifier) in query.iter_mut(&mut world) {
+            for (identifier, pos) in filter.iter_mut(&mut world) {
+                for packet in removed_packets.iter() {
+                    println!("Removed {:?}", *pos);
+                }
+            }
+        })
+}
+
+pub fn apply_position_modifications_system() -> Box<dyn Schedulable> {
+    SystemBuilder::new("apply_modifications_system")
+        .write_resource::<ReceiveBufferResource>()
+        .write_resource::<TrackResource>()
+        .read_resource::<RegisteredComponentsResource>()
+        .with_query(<(legion::prelude::Write<Position>, Read<UidComponent>)>::query())
+        .build(|command_buffer, mut world, resource, query| {
+            let by_uid = resource.2.slice_with_uid();
+
+            let filter = query.clone().filter(modified(&resource.1));
+
+            for (mut pos, identifier) in filter.iter_mut(&mut world) {
+                let uid = resource
+                    .2
+                    .get_uid(&pos.id().0)
+                    .expect("Type should be registered, make sure to implement `sync` attribute.");
+
+                let modified_packets: Vec<ReceivedPacket> =
+                    resource.0.drain_modified(identifier.uid(), *uid);
+
                 for packet in modified_packets.iter() {
-                    if identifier.uid() == packet.identifier() {
-                        if let legion_sync::Event::ComponentModified(data) = packet.event() {
-                            Apply::apply_to(&mut *pos, &data, Bincode);
-                            println!(".. Modified entity {:?}", packet.identifier());
-                            break;
-                        }
+                    if let legion_sync::Event::ComponentModified(_entity_id, record) =
+                        packet.event()
+                    {
+                        println!("Modified {:?} from {:?}", *pos, *identifier);
+                        Apply::apply_to(&mut *pos, &record.data(), Bincode);
                     }
                 }
-            }
-
-            /// 2) Filter and query removed components and retrieve the packets for those.
-            let filter = query.clone().filter(removed(&resources.1));
-            let removed_packets: Vec<ReceivedPacket> = resources.0.drain_removed();
-
-            for (pos, identifier) in filter.iter_mut(&mut world) {
-                for packet in removed_packets.iter() {
-                    println!("X Removed entity {:?}", packet.identifier());
-                }
-            }
-
-            /// 3) Filter and query inserted components and retrieve the packets for those.
-            let inserted_packets: Vec<ReceivedPacket> = resources.0.drain_inserted();
-
-            for packet in inserted_packets.iter() {
-                if let legion_sync::Event::EntityInserted(data) = packet.event() {
-                    let position = resources
-                        .2
-                        .serialization()
-                        .deserialize::<Position>(data[0].data())
-                        .unwrap();
-
-                    command_buffer.insert(
-                        (),
-                        vec![(position, UidComponent::new(packet.identifier().clone()))],
-                    );
-                }
-
-                println!("-> Inserted entity {:?}", packet.identifier());
             }
         })
 }

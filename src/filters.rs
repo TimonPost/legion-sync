@@ -155,7 +155,7 @@ pub mod test {
         },
         resources::TrackResource,
     };
-    use legion::prelude::{IntoQuery, Read, Schedulable, Schedule, SystemBuilder, Universe, World};
+    use legion::prelude::{IntoQuery, Read, Universe, World};
     use net_sync::uid::Uid;
 
     #[test]

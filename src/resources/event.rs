@@ -1,4 +1,4 @@
-use legion::{prelude::Event, systems::SubWorld, storage::ComponentTypeId};
+use legion::{prelude::Event, systems::SubWorld};
 
 use track::{
     re_exports::crossbeam_channel::{unbounded, Receiver, Sender, TryIter},
@@ -15,7 +15,6 @@ use legion::{
     prelude::{Entity, World},
 };
 use net_sync::uid::Uid;
-use crate::register::ComponentRegister;
 
 pub struct EventResource {
     modification_channel: ModificationChannel<Uid>,
@@ -70,10 +69,9 @@ impl EventResource {
                     let mut serialized_components: Vec<ComponentRecord> = Vec::new();
 
                     for component in components.slice_with_uid().iter() {
-                        if let Some(data) = component
-                            .1
-                            .serialize_if_in_entity(world, entity)
-                            .unwrap() {
+                        if let Some(data) =
+                            component.1.serialize_if_in_entity(world, entity).unwrap()
+                        {
                             let record = ComponentRecord::new(component.0.id(), data);
                             serialized_components.push(record);
                         }
@@ -81,9 +79,10 @@ impl EventResource {
 
                     // TODO: the same identifier is also in the `serialized_components`.
                     let identifier = get_identifier_component(world, entity);
-                    transport.send_immediate(
-                        crate::event::Event::EntityInserted(identifier, serialized_components),
-                    );
+                    transport.send_immediate(crate::event::Event::EntityInserted(
+                        identifier,
+                        serialized_components,
+                    ));
                 }
                 Event::EntityRemoved(entity, _) => {
                     let identifier = get_identifier_component(world, entity);
@@ -95,11 +94,14 @@ impl EventResource {
         }
 
         for modified in self.changed_components() {
-            let uid = components.get_uid(&modified.type_id).expect("Type is not registered. Make sure to apply the `sync` attribute.");
+            let uid = components
+                .get_uid(&modified.type_id)
+                .expect("Type is not registered. Make sure to apply the `sync` attribute.");
 
-            transport.send(
-                crate::event::Event::ComponentModified(modified.identifier, ComponentRecord::new(uid.0, modified.modified_fields))
-            );
+            transport.send(crate::event::Event::ComponentModified(
+                modified.identifier,
+                ComponentRecord::new(uid.0, modified.modified_fields),
+            ));
         }
     }
 }

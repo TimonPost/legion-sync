@@ -5,12 +5,12 @@ use legion_sync::{
     components::UidComponent,
     resources::{EventResource, RegisteredComponentsResource, SentBufferResource},
     systems::track_modifications_system,
+    tracking::*
 };
 use net_sync::uid::Uid;
 use std::{thread, time::Duration};
-use track::preclude::*;
 
-#[track]
+#[sync]
 #[derive(Debug)]
 pub struct Position {
     pub x: u16,
@@ -21,6 +21,12 @@ impl Position {
     pub fn set(&mut self, pos: (u16, u16)) {
         self.x = pos.0;
         self.y = pos.1;
+    }
+}
+
+impl Default for Position {
+    fn default() -> Self {
+        Position { x: 0, y: 0 }
     }
 }
 
@@ -73,7 +79,6 @@ pub fn watch_modifications_system() -> Box<dyn Schedulable> {
         .write_resource::<SentBufferResource>()
         .build(|_, _, sent_buffer, _| {
             for message in sent_buffer.drain_messages(|_| true).into_iter() {
-                print!("identifier: {:?} \t| ", message.identifier());
                 print!("urgency: {:?} \t| ", message.urgency());
                 println!("event: {:?}", message.event());
 

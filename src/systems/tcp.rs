@@ -41,7 +41,7 @@ pub fn tcp_connection_listener() -> Box<dyn Schedulable> {
                     }
                 };
 
-                resources.add_stream(addr, stream);
+                resources.register_stream(addr, stream);
             }
         })
 }

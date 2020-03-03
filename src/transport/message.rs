@@ -1,5 +1,4 @@
 use crate::{Event, UrgencyRequirement};
-use net_sync::uid::Uid;
 use serde::{Deserialize, Serialize};
 
 /// Structure used to hold message payloads before they are consumed and sent by an underlying
@@ -15,10 +14,7 @@ pub struct Message {
 impl Message {
     /// Creates and returns a new Message.
     pub(crate) fn new(event: Event, urgency: UrgencyRequirement) -> Self {
-        Self {
-            event,
-            urgency,
-        }
+        Self { event, urgency }
     }
 
     pub fn event(self) -> Event {

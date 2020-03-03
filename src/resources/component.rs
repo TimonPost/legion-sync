@@ -1,5 +1,7 @@
 use crate::register::{ComponentRegister, ComponentRegistrationRef};
 use net_sync::uid::Uid;
+use std::any::TypeId;
+use std::hash::Hash;
 use std::{
     collections::{
         hash_map::{self},
@@ -8,8 +10,6 @@ use std::{
     slice,
     sync::{Arc, Mutex, MutexGuard},
 };
-use std::any::{TypeId, Any};
-use std::hash::Hash;
 
 // Here we store three instances of registration storage's.
 // This is relatively cheap because they store references and allow us to retrieve an registration by key.
@@ -77,12 +77,20 @@ impl RegisteredComponentsResource {
     }
 }
 
-pub struct HashmapRegistry<'a, I> where I: Eq + Hash {
+pub struct HashmapRegistry<'a, I>
+where
+    I: Eq + Hash,
+{
     lock: MutexGuard<'a, HashMap<I, ComponentRegistrationRef>>,
 }
 
-impl<'a, I> HashmapRegistry<'a, I> where I: Eq + Hash {
-    pub fn new(guard: MutexGuard<'a, HashMap<I, ComponentRegistrationRef>>) -> HashmapRegistry<'a, I> {
+impl<'a, I> HashmapRegistry<'a, I>
+where
+    I: Eq + Hash,
+{
+    pub fn new(
+        guard: MutexGuard<'a, HashMap<I, ComponentRegistrationRef>>,
+    ) -> HashmapRegistry<'a, I> {
         Self { lock: guard }
     }
 
@@ -106,5 +114,35 @@ impl<'a> SliceRegistry<'a> {
 
     pub fn iter(&self) -> slice::Iter<(Uid, ComponentRegistrationRef)> {
         self.lock.iter()
+    }
+}
+
+#[cfg(test)]
+pub mod test {
+    use crate::resources::RegisteredComponentsResource;
+
+    #[test]
+    fn register_should_have_same_components_test() {
+        let registry = RegisteredComponentsResource::new();
+        let by_type_id = registry.by_type_id();
+        let by_uid = registry.by_uid();
+        let slice_with_uid = registry.slice_with_uid();
+
+        for entry in slice_with_uid.iter() {
+            assert!(by_type_id.get(&entry.1.ty()).is_some());
+            assert!(by_uid.get(&entry.0).is_some());
+        }
+    }
+
+    #[test]
+    fn type_mappings_are_correct_test() {
+        let registry = RegisteredComponentsResource::new();
+
+        let slice_with_uid = registry.slice_with_uid();
+
+        for entry in slice_with_uid.iter() {
+            assert!(registry.get_uid(&entry.1.ty()).is_some());
+            assert!(registry.get_type(&entry.0).is_some());
+        }
     }
 }

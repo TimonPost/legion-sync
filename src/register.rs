@@ -17,7 +17,6 @@ use std::{
     sync::Arc,
 };
 use track::{error::ErrorKind, serialization::SerializationStrategy};
-use std::mem::MaybeUninit;
 
 inventory::collect!(ComponentRegistration);
 
@@ -141,28 +140,28 @@ pub struct ComponentRegister;
 
 impl ComponentRegister {
     pub fn by_component_id() -> HashMap<ComponentTypeId, ComponentRegistrationRef> {
-        let mut allocated_components = HashMap::new();
+        let mut registered_components = HashMap::new();
 
         for component in ComponentRegister.iter() {
-            allocated_components.insert(component.component_type_id(), component);
+            registered_components.insert(component.component_type_id(), component);
         }
 
-        allocated_components
+        registered_components
     }
 
     pub fn by_unique_uid() -> HashMap<Uid, ComponentRegistrationRef> {
         let mut uid_allocator = UidAllocator::new();
-        let mut allocated_components = HashMap::new();
+        let mut registered_components = HashMap::new();
 
         for component in ComponentRegister.iter() {
             let id = uid_allocator.allocate(None);
-            allocated_components.insert(id, component);
+            registered_components.insert(id, component);
         }
 
-        allocated_components
+        registered_components
     }
 
-    pub fn iter(&self) -> impl Iterator<Item =ComponentRegistrationRef> {
+    pub fn iter(&self) -> impl Iterator<Item = ComponentRegistrationRef> {
         inventory::iter::<ComponentRegistration>.into_iter()
     }
 }
@@ -186,7 +185,7 @@ pub mod test {
     use legion::storage::{ComponentMeta, ComponentTypeId};
     use net_sync::uid::Uid;
     use serde::{Deserialize, Serialize};
-    use std::any::{Any, TypeId};
+    use std::any::TypeId;
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize)]
     struct Component;
@@ -235,7 +234,7 @@ pub mod test {
             .map(|(k, v)| v.clone())
             .collect::<Vec<ComponentRegistration>>();
 
-        assert!(registered[0].type_name() == std::any::type_name::<UidComponent>(););
+        assert!(registered[0].type_name() == std::any::type_name::<UidComponent>());
         assert!(registered[0].meta() == &ComponentMeta::of::<UidComponent>());
         assert_eq!(
             registered[0].component_type_id(),

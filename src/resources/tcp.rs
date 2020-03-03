@@ -60,7 +60,8 @@ impl TcpListenerResource {
         self.streams.get_mut(&addr)
     }
 
-    pub fn add_stream(&mut self, addr: SocketAddr, stream: TcpStream) {
+    /// Registers an new incoming stream to the TCP listener.
+    pub fn register_stream(&mut self, addr: SocketAddr, stream: TcpStream) {
         self.streams.insert(addr, (true, stream));
     }
 
@@ -70,6 +71,7 @@ impl TcpListenerResource {
         self.streams.remove(&addr)
     }
 
+    /// Returns an iterator over the Tcp listener its streams.
     pub fn iter_mut(&mut self) -> IterMut<'_, SocketAddr, (bool, TcpStream)> {
         self.streams.iter_mut()
     }
