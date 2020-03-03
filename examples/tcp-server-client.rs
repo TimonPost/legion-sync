@@ -6,7 +6,7 @@ use legion_sync::{
     resources::{
         tcp::{TcpClientResource, TcpListenerResource},
         BufferResource, EventResource, Packer, ReceiveBufferResource, RegisteredComponentsResource,
-        SentBufferResource, TrackResource,
+        SentBufferResource, TrackResource, ResourcesExt
     },
     systems::{
         tcp::{tcp_connection_listener, tcp_receive_system, tcp_sent_system},
@@ -63,12 +63,8 @@ fn start_server() {
 
         // Insert the needed resources for receiving component synchronizations.
         let mut resources = Resources::default();
-        resources.insert(TrackResource::new());
-        resources.insert(ReceiveBufferResource::default());
         resources.insert(TcpListenerResource::new(Some(listener)));
-        resources.insert(Packer::<Bincode, Lz4>::default());
-        resources.insert(BufferResource::from_capacity(1500));
-        resources.insert(RegisteredComponentsResource::new());
+        resources.insert_server_resources(Bincode, Lz4);
 
         let mut schedule = initialize_server_systems();
 
@@ -93,9 +89,7 @@ fn start_client() -> JoinHandle<()> {
         let mut resources = Resources::default();
         resources.insert(tcp_client);
         resources.insert(event_resource);
-        resources.insert(SentBufferResource::new());
-        resources.insert(Packer::<Bincode, Lz4>::default());
-        resources.insert(RegisteredComponentsResource::new());
+        resources.insert_client_resources(Bincode, Lz4);
 
         // Custom resource that we need in this example.
         let mut allocator = UidAllocator::new();
