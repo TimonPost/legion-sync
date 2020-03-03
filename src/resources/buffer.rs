@@ -25,32 +25,32 @@ pub struct ReceiveBufferResource {
 }
 
 impl ReceiveBufferResource {
-    pub fn drain_modified(&mut self) -> Vec<ReceivedPacket> {
-        self.drain(|event, _id| match event {
-            Event::Modified(_) => true,
+    pub fn drain_modified(&mut self, entity_id: Uid, register_id: Uid) -> Vec<ReceivedPacket> {
+        self.drain(|event| match event {
+            Event::ComponentModified(_entity_id, record) => *_entity_id == entity_id && record.register_id() == register_id.0,
             _ => false,
         })
     }
 
     pub fn drain_removed(&mut self) -> Vec<ReceivedPacket> {
-        self.drain(|event, _id| match event {
-            Event::Removed => true,
+        self.drain(|event| match event {
+            Event::EntityRemoved(_entity_id) => true,
             _ => false,
         })
     }
 
     pub fn drain_inserted(&mut self) -> Vec<ReceivedPacket> {
-        self.drain(|event, _id| match event {
-            Event::Inserted(_) => true,
+        self.drain(|event| match event {
+            Event::EntityInserted(_entity_id, _) => true,
             _ => false,
         })
     }
 
-    pub fn drain(&mut self, mut filter: impl FnMut(&Event, Uid) -> bool) -> Vec<ReceivedPacket> {
+    pub fn drain(&mut self, mut filter: impl FnMut(&Event) -> bool) -> Vec<ReceivedPacket> {
         let mut drained = Vec::with_capacity(self.messages.len());
         let mut i = 0;
         while i != self.messages.len() {
-            if filter(&self.messages[i].event(), self.messages[i].identifier()) {
+            if filter(&self.messages[i].event()) {
                 if let Some(m) = self.messages.remove(i) {
                     drained.push(m);
                 }
@@ -102,16 +102,16 @@ impl SentBufferResource {
 
     /// Creates a `Message` with the default guarantees provided by the `Socket` implementation and
     /// pushes it onto the messages queue to be sent on next sim tick.
-    pub fn send(&mut self, uid: Uid, event: Event) {
+    pub fn send(&mut self, event: Event) {
         self.messages
-            .push_back(Message::new(uid, event, UrgencyRequirement::OnTick));
+            .push_back(Message::new(event, UrgencyRequirement::OnTick));
     }
 
     /// Creates a `Message` with the default guarantees provided by the `Socket` implementation and
     /// Pushes it onto the messages queue to be sent immediately.
-    pub fn send_immediate(&mut self, uid: Uid, event: Event) {
+    pub fn send_immediate(&mut self, event: Event) {
         self.messages
-            .push_back(Message::new(uid, event, UrgencyRequirement::Immediate));
+            .push_back(Message::new(event, UrgencyRequirement::Immediate));
     }
 
     /// Returns true if there are messages enqueued to be sent.
@@ -173,7 +173,7 @@ mod tests {
     fn test_send_with_default_requirements() {
         let mut resource = create_test_resource();
 
-        resource.send(Uid(0), Event::Removed);
+        resource.send(Uid(0), Event::EntityRemoved);
 
         let packet = &resource.messages[0];
 
@@ -185,7 +185,7 @@ mod tests {
     fn test_send_immediate_message() {
         let mut resource = create_test_resource();
 
-        resource.send_immediate(Uid(0), Event::Modified(test_payload().to_vec()));
+        resource.send_immediate(Uid(0), Event::ComponentModified(test_payload().to_vec()));
 
         let packet = &resource.messages[0];
 
@@ -197,7 +197,7 @@ mod tests {
     fn test_has_messages() {
         let mut resource = create_test_resource();
         assert_eq!(resource.has_messages(), false);
-        resource.send_immediate(Uid(0), Event::Modified(test_payload().to_vec()));
+        resource.send_immediate(Uid(0), Event::ComponentModified(test_payload().to_vec()));
         assert_eq!(resource.has_messages(), true);
     }
 
@@ -206,11 +206,11 @@ mod tests {
         let mut resource = create_test_resource();
 
         let addr = "127.0.0.1:3000".parse::<SocketAddr>().unwrap();
-        resource.send_immediate(Uid(0), Event::Modified(test_payload().to_vec()));
-        resource.send_immediate(Uid(0), Event::Modified(test_payload().to_vec()));
-        resource.send(Uid(0), Event::Removed);
-        resource.send(Uid(0), Event::Removed);
-        resource.send_immediate(Uid(0), Event::Modified(test_payload().to_vec()));
+        resource.send_immediate(Uid(0), Event::ComponentModified(test_payload().to_vec()));
+        resource.send_immediate(Uid(0), Event::ComponentModified(test_payload().to_vec()));
+        resource.send(Uid(0), Event::EntityRemoved);
+        resource.send(Uid(0), Event::EntityRemoved);
+        resource.send_immediate(Uid(0), Event::ComponentModified(test_payload().to_vec()));
 
         assert_eq!(resource.drain_messages_to_send(|_| false).len(), 3);
         assert_eq!(resource.drain_messages_to_send(|_| false).len(), 0);
@@ -246,12 +246,12 @@ mod tests {
     fn packets() -> Vec<ReceivedPacket> {
         let addr = "127.0.0.1:1234".parse().unwrap();
         vec![
-            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::Removed)),
-            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::Inserted(vec![]))),
-            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::Inserted(vec![]))),
-            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::Modified(vec![]))),
-            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::Modified(vec![]))),
-            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::Modified(vec![]))),
+            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::EntityRemoved)),
+            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::EntityInserted(vec![]))),
+            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::EntityInserted(vec![]))),
+            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::ComponentModified(vec![]))),
+            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::ComponentModified(vec![]))),
+            ReceivedPacket::new(addr, SentPacket::new(Uid(0), Event::ComponentModified(vec![]))),
         ]
     }
 

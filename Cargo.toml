@@ -16,7 +16,7 @@ net-sync = { version = "0.0.1", path = "../net-sync" }
 track = { version = "0.1.0", path = "../track" }
 legion-sync-macro = {path = "../legion-sync-macro" }
 
-legion = { version = "0.2.1", git = "https://github.com/TimonPost/legion.git", branch = "clone_merge_merge" }
+legion = { version = "0.2.1", branch = "clone_move", path = "../../legion"}
 serde = "1.0.104"
 log = "0.4.8"
 inventory = "0.1"

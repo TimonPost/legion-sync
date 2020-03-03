@@ -5,19 +5,13 @@ use std::net::SocketAddr;
 
 #[derive(Clone, Debug, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SentPacket {
-    /// The identifier that identifies the entity to which this change belongs.
-    identifier: Uid,
     /// The event that defines what kind of packet this is.
     event: Event,
 }
 
 impl SentPacket {
-    pub(crate) fn new(identifier: Uid, event: Event) -> SentPacket {
-        SentPacket { identifier, event }
-    }
-
-    pub fn identifier(&self) -> &Uid {
-        &self.identifier
+    pub(crate) fn new(event: Event) -> SentPacket {
+        SentPacket { event }
     }
 
     pub fn event(&self) -> &Event {
@@ -27,7 +21,6 @@ impl SentPacket {
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
 pub struct ReceivedPacket {
-    identifier: Uid,
     addr: SocketAddr,
     event: Event,
 }
@@ -36,13 +29,8 @@ impl ReceivedPacket {
     pub fn new(addr: SocketAddr, packet: SentPacket) -> Self {
         ReceivedPacket {
             event: packet.event,
-            identifier: packet.identifier,
             addr,
         }
-    }
-
-    pub fn identifier(&self) -> Uid {
-        self.identifier
     }
 
     pub fn source(&self) -> &SocketAddr {
@@ -62,7 +50,7 @@ pub mod test {
     #[test]
     fn create_sent_packet_test() {
         let id = Uid(0);
-        let event = Event::Removed;
+        let event = Event::EntityRemoved;
 
         let packet = SentPacket::new(id, event.clone());
         assert_eq!(*packet.identifier(), id);

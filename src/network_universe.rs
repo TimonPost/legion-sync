@@ -1,41 +1,37 @@
 use legion::{prelude::World, world::Universe};
 use std::ops::{Deref, DerefMut};
+use std::collections::HashMap;
+use legion::prelude::Entity;
 
 pub struct NetworkUniverse {
     universe: Universe,
-    local_world: World,
-    remote_world: World,
+    replace_mappings: HashMap<Entity, Entity>,
+    result_mappings: HashMap<Entity, Entity>
 }
 
 impl NetworkUniverse {
     pub fn new() -> NetworkUniverse {
         let universe = Universe::new();
         NetworkUniverse {
-            local_world: universe.create_world(),
-            remote_world: universe.create_world(),
             universe,
+            replace_mappings: HashMap::new(),
+            result_mappings: HashMap::new()
         }
     }
 
-    pub fn local_update(&mut self) {
-        self.local_world.clone_merge(
-            &self.remote_world,
+    pub fn merge_into(&mut self, local: &mut World, remote: &World) {
+        local.clone_from(
+            &remote,
             &crate::create_copy_clone_impl(),
-            None,
-            None,
+            Some(&self.replace_mappings),
+            Some(&mut self.result_mappings),
         );
+
+        self.replace_mappings.extend(self.result_mappings.iter().map(|(k, v)| (k.clone(), v.clone())));
     }
 
-    pub fn local(&self) -> &World {
-        &self.local_world
-    }
-
-    pub fn local_mut(&mut self) -> &mut World {
-        &mut self.local_world
-    }
-
-    pub fn remote_mut(&mut self) -> &mut World {
-        &mut self.remote_world
+    pub fn create_world(&self) -> World {
+        self.universe.create_world()
     }
 }
 
@@ -78,34 +74,36 @@ pub mod test {
     }
 
     #[test]
-    pub fn merge_remote_with_local_world() {
+    fn merge_remote_with_local_world() {
         let mut universe = NetworkUniverse::new();
+        let mut local = universe.create_world();
+        let mut remote = universe.create_world();
 
         let query = <(Read<Position>)>::query();
 
         // insert into remote world
-        universe
-            .remote_mut()
-            .insert(
-                (),
-                vec![(
-                    Position { x: 1, y: 1 },
-                    UidComponent::new(UidAllocator::new().allocate(Some(1))),
-                )],
-            )
-            .to_vec();
+        remote.insert(
+            (),
+            vec![(
+                Position { x: 1, y: 1 },
+                UidComponent::new(UidAllocator::new().allocate(Some(1))),
+            )],
+        )
+        .to_vec();
 
         // assert local world
-        for entry in query.iter(&universe.local()) {
+        for entry in query.iter(&local) {
             panic!("should not contain entities.")
         }
 
-        universe.local_update();
+
+        universe.merge_into(&mut local, &remote);
+        universe.merge_into(&mut local, &remote);
 
         // re-assert local world should contain merged entity.
         assert_eq!(
             query
-                .iter(&universe.local())
+                .iter(&local)
                 .collect::<Vec<(Ref<Position>)>>()
                 .len(),
             1

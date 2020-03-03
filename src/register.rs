@@ -17,11 +17,12 @@ use std::{
     sync::Arc,
 };
 use track::{error::ErrorKind, serialization::SerializationStrategy};
+use std::mem::MaybeUninit;
 
 inventory::collect!(ComponentRegistration);
 
-pub type RegisteredComponent = &'static ComponentRegistration;
-pub type HashmapRegistery = HashMap<ComponentTypeId, RegisteredComponent>;
+pub type ComponentRegistrationRef = &'static ComponentRegistration;
+pub type HashmapRegistery = HashMap<ComponentTypeId, ComponentRegistrationRef>;
 
 #[derive(Clone)]
 pub struct ComponentRegistration {
@@ -139,7 +140,7 @@ impl ComponentRegistration {
 pub struct ComponentRegister;
 
 impl ComponentRegister {
-    pub fn by_component_id() -> HashMap<ComponentTypeId, RegisteredComponent> {
+    pub fn by_component_id() -> HashMap<ComponentTypeId, ComponentRegistrationRef> {
         let mut allocated_components = HashMap::new();
 
         for component in ComponentRegister.iter() {
@@ -149,7 +150,7 @@ impl ComponentRegister {
         allocated_components
     }
 
-    pub fn by_unique_uid() -> HashMap<Uid, RegisteredComponent> {
+    pub fn by_unique_uid() -> HashMap<Uid, ComponentRegistrationRef> {
         let mut uid_allocator = UidAllocator::new();
         let mut allocated_components = HashMap::new();
 
@@ -161,7 +162,7 @@ impl ComponentRegister {
         allocated_components
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = RegisteredComponent> {
+    pub fn iter(&self) -> impl Iterator<Item =ComponentRegistrationRef> {
         inventory::iter::<ComponentRegistration>.into_iter()
     }
 }
@@ -179,7 +180,7 @@ macro_rules! register_component_type {
 pub mod test {
     use crate::{
         components::UidComponent,
-        register::{ComponentRegister, ComponentRegistration, RegisteredComponent},
+        register::{ComponentRegister, ComponentRegistration, ComponentRegistrationRef},
         tracking::Bincode,
     };
     use legion::storage::{ComponentMeta, ComponentTypeId};
@@ -221,7 +222,7 @@ pub mod test {
             .into_iter()
             .filter(|f| f.1.ty() == TypeId::of::<UidComponent>())
             .map(|(k, v)| v)
-            .collect::<Vec<RegisteredComponent>>();
+            .collect::<Vec<ComponentRegistrationRef>>();
 
         assert_eq!(registered.len(), 1);
     }

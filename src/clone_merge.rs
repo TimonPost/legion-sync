@@ -1,4 +1,4 @@
-use crate::register::RegisteredComponent;
+use crate::register::ComponentRegistrationRef;
 use legion::{
     prelude::*,
     storage::{ComponentMeta, ComponentStorage, ComponentTypeId},
@@ -8,22 +8,22 @@ use std::collections::HashMap;
 /// A trivial clone merge impl that does nothing but copy data. All component types must be
 /// cloneable and no type transformations are allowed
 pub struct CopyCloneImpl {
-    components: HashMap<ComponentTypeId, RegisteredComponent>,
+    components: HashMap<ComponentTypeId, ComponentRegistrationRef>,
 }
 
 impl CopyCloneImpl {
-    pub fn new(components: HashMap<ComponentTypeId, RegisteredComponent>) -> Self {
+    pub fn new(components: HashMap<ComponentTypeId, ComponentRegistrationRef>) -> Self {
         Self { components }
     }
 }
 
-impl legion::world::CloneMergeImpl for CopyCloneImpl {
+impl legion::world::CloneImpl for CopyCloneImpl {
     fn map_component_type(
         &self,
         component_type: ComponentTypeId,
     ) -> (ComponentTypeId, ComponentMeta) {
         let comp_reg = &self.components[&component_type];
-        (ComponentTypeId(comp_reg.ty(), 0), comp_reg.meta().clone())
+        (comp_reg.component_type_id(), comp_reg.meta().clone())
     }
 
     fn clone_components(

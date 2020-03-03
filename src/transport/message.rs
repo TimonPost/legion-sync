@@ -6,8 +6,6 @@ use serde::{Deserialize, Serialize};
 /// NetworkSystem.
 #[derive(Clone, Debug, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Message {
-    /// The identifier that identifies the entity to which this change belongs.
-    identifier: Uid,
     /// The event that defines what kind of packet this is.
     event: Event,
     /// The requirement around when this message should be sent.
@@ -16,16 +14,11 @@ pub struct Message {
 
 impl Message {
     /// Creates and returns a new Message.
-    pub(crate) fn new(identifier: Uid, event: Event, urgency: UrgencyRequirement) -> Self {
+    pub(crate) fn new(event: Event, urgency: UrgencyRequirement) -> Self {
         Self {
-            identifier,
             event,
             urgency,
         }
-    }
-
-    pub fn identifier(&self) -> Uid {
-        self.identifier
     }
 
     pub fn event(self) -> Event {
@@ -49,11 +42,10 @@ pub mod test {
     #[test]
     fn create_message_test() {
         let id = Uid(0);
-        let event = Event::Removed;
+        let event = Event::EntityRemoved(Uid(1));
         let requirement = UrgencyRequirement::Immediate;
 
-        let message = Message::new(id, event.clone(), requirement.clone());
-        assert_eq!(message.identifier(), id);
+        let message = Message::new(event.clone(), requirement.clone());
         assert_eq!(message.event_ref(), &event);
         assert_eq!(message.urgency(), requirement);
     }

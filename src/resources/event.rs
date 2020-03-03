@@ -1,4 +1,4 @@
-use legion::{prelude::Event, systems::SubWorld};
+use legion::{prelude::Event, systems::SubWorld, storage::ComponentTypeId};
 
 use track::{
     re_exports::crossbeam_channel::{unbounded, Receiver, Sender, TryIter},
@@ -15,6 +15,7 @@ use legion::{
     prelude::{Entity, World},
 };
 use net_sync::uid::Uid;
+use crate::register::ComponentRegister;
 
 pub struct EventResource {
     modification_channel: ModificationChannel<Uid>,
@@ -68,35 +69,36 @@ impl EventResource {
                 Event::EntityInserted(entity, _chunk_id) => {
                     let mut serialized_components: Vec<ComponentRecord> = Vec::new();
 
-                    for component in components.slice().iter() {
-                        let serialization = component
+                    for component in components.slice_with_uid().iter() {
+                        if let Some(data) = component
                             .1
                             .serialize_if_in_entity(world, entity)
-                            .unwrap()
-                            .unwrap();
-                        let record = ComponentRecord::new(component.0.id(), serialization);
-                        serialized_components.push(record);
+                            .unwrap() {
+                            let record = ComponentRecord::new(component.0.id(), data);
+                            serialized_components.push(record);
+                        }
                     }
 
+                    // TODO: the same identifier is also in the `serialized_components`.
                     let identifier = get_identifier_component(world, entity);
                     transport.send_immediate(
-                        identifier,
-                        crate::event::Event::Inserted(serialized_components),
+                        crate::event::Event::EntityInserted(identifier, serialized_components),
                     );
                 }
                 Event::EntityRemoved(entity, _) => {
                     let identifier = get_identifier_component(world, entity);
 
-                    transport.send_immediate(identifier, crate::event::Event::Removed);
+                    transport.send_immediate(crate::event::Event::EntityRemoved(identifier));
                 }
                 _ => { /*modified events are handled below */ }
             }
         }
 
         for modified in self.changed_components() {
+            let uid = components.get_uid(&modified.type_id).expect("Type is not registered. Make sure to apply the `sync` attribute.");
+
             transport.send(
-                modified.identifier,
-                crate::event::Event::Modified(modified.modified_fields),
+                crate::event::Event::ComponentModified(modified.identifier, ComponentRecord::new(uid.0, modified.modified_fields))
             );
         }
     }

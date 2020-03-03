@@ -12,7 +12,7 @@ pub mod tcp;
 pub fn track_modifications_system() -> Box<dyn Schedulable> {
     let mut builder = SystemBuilder::new("track_modifications_system");
 
-    for component in RegisteredComponentsResource::new().slice().iter() {
+    for component in RegisteredComponentsResource::new().slice_with_uid().iter() {
         builder = component.1.add_to_system(builder);
     }
 

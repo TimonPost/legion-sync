@@ -142,7 +142,7 @@ pub fn receive_system<S: SerializationStrategy + 'static, C: CompressionStrategy
             for (mut pos, identifier) in query.iter_mut(&mut world) {
                 for packet in modified_packets.iter() {
                     if identifier.uid() == packet.identifier() {
-                        if let legion_sync::Event::Modified(data) = packet.event() {
+                        if let legion_sync::Event::ComponentModified(data) = packet.event() {
                             Apply::apply_to(&mut *pos, &data, Bincode);
                             println!(".. Modified entity {:?}", packet.identifier());
                             break;
@@ -165,7 +165,7 @@ pub fn receive_system<S: SerializationStrategy + 'static, C: CompressionStrategy
             let inserted_packets: Vec<ReceivedPacket> = resources.0.drain_inserted();
 
             for packet in inserted_packets.iter() {
-                if let legion_sync::Event::Inserted(data) = packet.event() {
+                if let legion_sync::Event::EntityInserted(data) = packet.event() {
                     let position = resources
                         .2
                         .serialization()

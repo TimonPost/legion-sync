@@ -1,5 +1,7 @@
 pub use event::Event;
 pub use transport::{ComponentRecord, Message, ReceivedPacket, SentPacket, UrgencyRequirement};
+use track::Identifier;
+use legion::storage::ComponentTypeId;
 
 mod event;
 mod transport;
@@ -23,6 +25,7 @@ pub mod tracking {
 
     pub use inventory;
     pub use legion_sync_macro::sync;
+    pub use legion::storage::ComponentTypeId;
 }
 
 pub fn create_copy_clone_impl() -> clone_merge::CopyCloneImpl {

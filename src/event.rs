@@ -1,9 +1,13 @@
 use crate::transport::ComponentRecord;
 use serde::{Deserialize, Serialize};
+use net_sync::uid::Uid;
 
 #[derive(Clone, Debug, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
 pub enum Event {
-    Inserted(Vec<ComponentRecord>),
-    Modified(Vec<u8>),
-    Removed,
+    EntityInserted(Uid, Vec<ComponentRecord>),
+    EntityRemoved(Uid),
+
+    ComponentModified(Uid, ComponentRecord),
+    ComponentRemoved(Uid),
+    ComponentAdd(Uid, ComponentRecord)
 }

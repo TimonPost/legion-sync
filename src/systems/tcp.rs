@@ -92,19 +92,19 @@ pub fn tcp_receive_system<S: SerializationStrategy + 'static, C: CompressionStra
                                             .deserialize::<Vec<SentPacket>>(&decompressed)  {
                                             Ok(deserialized) => {
                                                 let _ = deserialized.into_iter()
-                                                    .map(|p| {
-                                                        let entity_id = p.identifier().0 as usize;
+                                                    .map(|p: SentPacket| {
                                                         match p.event() {
-                                                            Event::Inserted(_) => {
-                                                                tracker.insert(entity_id);
+                                                            Event::EntityInserted(entity_id, _) => {
+                                                                tracker.insert(entity_id.0 as usize);
                                                             }
-                                                            Event::Modified(_) => {
-                                                                debug!("!!!modified");
-                                                                tracker.modify(entity_id);
+                                                            Event::ComponentModified(entity_id, _) => {
+                                                                tracker.modify(entity_id.0 as usize);
                                                             }
-                                                            Event::Removed => {
-                                                                tracker.remove(entity_id);
+                                                            Event::EntityRemoved(entity_id) => {
+                                                                tracker.remove(entity_id.0 as usize);
                                                             }
+                                                            Event::ComponentRemoved(_) => {}
+                                                            Event::ComponentAdd(_, _) => {}
                                                         }
 
                                                         receive_queue.push(ReceivedPacket::new(peer_addr, p));
@@ -155,7 +155,7 @@ pub fn tcp_sent_system<S: SerializationStrategy + 'static, C: CompressionStrateg
             let data = sent_buffer
                 .drain_messages(|_| true)
                 .into_iter()
-                .map(|message| SentPacket::new(message.identifier(), message.event()))
+                .map(|message| SentPacket::new(message.event()))
                 .collect::<Vec<SentPacket>>();
 
             match &packer.serialization().serialize(&data) {
