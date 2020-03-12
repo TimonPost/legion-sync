@@ -4,17 +4,18 @@ use legion::{
     iterator::SliceVecIter,
     storage::{ComponentResourceSet, ComponentStorage, ComponentTypeId},
 };
-use std::collections::{HashMap, HashSet};
-use std::slice::Iter;
+use std::{collections::HashSet, slice::Iter};
 
 pub mod filter_fns {
     use super::{ModifiedFilter, RemovedFilter, TrackFilter};
-    use crate::filters::RegisteredComponentFilter;
-    use crate::register::ComponentRegister;
-    use crate::tracking::ComponentTypeId;
-    use crate::{filters::AllFilter, resources::TrackResource};
-    use legion::filter::{EntityFilterTuple, Passthrough};
-    use std::collections::{HashMap, HashSet};
+    use crate::{
+        filters::{AllFilter, RegisteredComponentFilter},
+        register::ComponentRegister,
+        resources::TrackResource,
+        tracking::ComponentTypeId,
+    };
+    use legion::filter::{Any, EntityFilterTuple, Passthrough};
+    use std::collections::HashSet;
 
     pub fn all<'a>(
         cash: &'a TrackResource,
@@ -50,16 +51,16 @@ pub mod filter_fns {
         )
     }
 
-    pub fn registered() -> EntityFilterTuple<RegisteredComponentFilter, Passthrough, Passthrough> {
+    pub fn registered() -> EntityFilterTuple<RegisteredComponentFilter, Any, Any> {
         let registered_components = ComponentRegister::by_component_id()
             .iter()
-            .map(|(k, v)| *k)
+            .map(|(k, _)| *k)
             .collect::<HashSet<ComponentTypeId>>();
 
         EntityFilterTuple::new(
             RegisteredComponentFilter::new(registered_components),
-            Passthrough,
-            Passthrough,
+            Any,
+            Any,
         )
     }
 }
@@ -223,19 +224,21 @@ impl<'a, Rhs: ActiveFilter> std::ops::BitAnd<Rhs> for RegisteredComponentFilter 
 
 #[cfg(test)]
 pub mod test {
-    use crate::filters::filter_fns::registered;
-    use crate::filters::RegisteredComponentFilter;
-    use crate::tracking::ComponentTypeId;
     use crate::{
         components::UidComponent,
         filters::{
-            filter_fns::{all, modified, removed},
-            AllFilter, ModifiedFilter, RemovedFilter, TrackResourceFilter,
+            filter_fns::{all, modified, registered, removed},
+            AllFilter, ModifiedFilter, RegisteredComponentFilter, RemovedFilter,
+            TrackResourceFilter,
         },
         resources::TrackResource,
+        tracking::ComponentTypeId,
     };
-    use legion::filter::*;
-    use legion::prelude::{IntoQuery, Read, Universe, World};
+    use legion::{
+        event::Event,
+        filter::*,
+        prelude::{IntoQuery, Read, Universe, World},
+    };
     use net_sync::uid::Uid;
     use std::collections::HashSet;
 
@@ -399,6 +402,54 @@ pub mod test {
         }
 
         assert_eq!(count, 2);
+    }
+
+    #[test]
+    fn should_receive_events_test() {
+        struct A;
+
+        let (tx, rx) = crate::tracking::re_exports::crossbeam_channel::unbounded::<Event>();
+        let (universe, mut world) = get_world();
+
+        let mut registered = HashSet::new();
+        registered.insert(ComponentTypeId::of::<A>());
+
+        let filter = EntityFilterTuple::new(RegisteredComponentFilter::new(registered), Any, Any);
+
+        world.subscribe(tx, filter);
+
+        let entities1 = world.insert((), vec![(A,)]).to_owned();
+        world.delete(entities1[0]);
+        let entities2 = world.insert((), vec![(A,)]).to_owned();
+        world.delete(entities2[0]);
+        let entities3 = world.insert((), vec![(A,)]).to_owned();
+        world.delete(entities3[0]);
+
+        let events = rx.try_iter().collect::<Vec<Event>>();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| match **e {
+                    Event::EntityRemoved(_, _) => true,
+                    _ => false,
+                })
+                .map(|x| x.clone())
+                .collect::<Vec<Event>>()
+                .len(),
+            3
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|e| match **e {
+                    Event::EntityInserted(_, _) => true,
+                    _ => false,
+                })
+                .map(|x| x.clone())
+                .collect::<Vec<Event>>()
+                .len(),
+            3
+        );
     }
 
     fn get_world() -> (Universe, World) {

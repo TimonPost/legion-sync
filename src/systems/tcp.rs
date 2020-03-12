@@ -95,16 +95,23 @@ pub fn tcp_receive_system<S: SerializationStrategy + 'static, C: CompressionStra
                                                     .map(|p: SentPacket| {
                                                         match p.event() {
                                                             Event::EntityInserted(entity_id, _) => {
+                                                                debug!("Received Entity Inserted {:?}", entity_id);
                                                                 tracker.insert(entity_id.0 as usize);
                                                             }
                                                             Event::ComponentModified(entity_id, _) => {
+                                                                debug!("Received Entity Modified {:?}", entity_id);
                                                                 tracker.modify(entity_id.0 as usize);
                                                             }
                                                             Event::EntityRemoved(entity_id) => {
+                                                                debug!("Received Entity Removed {:?}", entity_id);
                                                                 tracker.remove(entity_id.0 as usize);
                                                             }
-                                                            Event::ComponentRemoved(_) => {}
-                                                            Event::ComponentAdd(_, _) => {}
+                                                            Event::ComponentRemoved(entity_id) => {
+                                                                debug!("Received Component Removed {:?}", entity_id);
+                                                            }
+                                                            Event::ComponentAdd(entity_id, _) => {
+                                                                debug!("Received Component Add {:?}", entity_id);
+                                                            }
                                                         }
 
                                                         receive_queue.push(ReceivedPacket::new(peer_addr, p));

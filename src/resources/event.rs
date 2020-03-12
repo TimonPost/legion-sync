@@ -1,12 +1,8 @@
 use legion::{prelude::Event, systems::SubWorld};
 
-use track::{
-    re_exports::crossbeam_channel::{unbounded, Receiver, Sender, TryIter},
-    ModificationChannel, ModificationEvent,
-};
-
 use crate::{
-    components::UidComponent,
+    event::{LegionEvent, LegionEventHandler},
+    filters::filter_fns::registered,
     resources::{RegisteredComponentsResource, SentBufferResource},
     transport::ComponentRecord,
 };
@@ -14,7 +10,12 @@ use legion::{
     filter::EntityFilter,
     prelude::{Entity, World},
 };
-use net_sync::uid::Uid;
+use log::debug;
+use net_sync::uid::{Uid, UidAllocator};
+use track::{
+    re_exports::crossbeam_channel::{unbounded, Receiver, Sender, TryIter},
+    ModificationChannel, ModificationEvent,
+};
 
 pub struct EventResource {
     modification_channel: ModificationChannel<Uid>,
@@ -23,8 +24,10 @@ pub struct EventResource {
 }
 
 impl EventResource {
-    pub fn new() -> EventResource {
+    pub fn new(world: &mut World) -> EventResource {
         let (tx, rx) = unbounded();
+
+        world.subscribe(tx.clone(), registered());
 
         EventResource {
             legion_events_tx: tx,
@@ -61,11 +64,19 @@ impl EventResource {
         &self,
         transport: &mut SentBufferResource,
         components: &RegisteredComponentsResource,
+        uid_allocator: &mut UidAllocator<Entity>,
         world: &mut SubWorld,
     ) {
-        for legion_event in self.legion_events() {
+        let mut event_handler = LegionEventHandler::new();
+        let events = event_handler.handle(&self.legion_events_rx, world, components);
+
+        for legion_event in events {
             match legion_event {
-                Event::EntityInserted(entity, _chunk_id) => {
+                LegionEvent::EntityInserted(entity, component_count) => {
+                    debug!("Inserted {:?} with {} components", entity, component_count);
+
+                    let identifier = uid_allocator.get(&entity);
+
                     let mut serialized_components: Vec<ComponentRecord> = Vec::new();
 
                     for component in components.slice_with_uid().iter() {
@@ -77,23 +88,45 @@ impl EventResource {
                         }
                     }
 
-                    // TODO: the same identifier is also in the `serialized_components`.
-                    let identifier = get_identifier_component(world, entity);
                     transport.send_immediate(crate::event::Event::EntityInserted(
                         identifier,
                         serialized_components,
                     ));
                 }
-                Event::EntityRemoved(entity, _) => {
-                    let identifier = get_identifier_component(world, entity);
+                LegionEvent::EntityRemoved(entity) => {
+                    debug!("Removed {:?}", entity);
 
-                    transport.send_immediate(crate::event::Event::EntityRemoved(identifier));
+                    let identifier = uid_allocator
+                        .deallocate(entity)
+                        .expect("Entity should be allocated.");
+                    transport.send_immediate(crate::event::Event::EntityRemoved(Uid(identifier)));
                 }
-                _ => { /*modified events are handled below */ }
+                LegionEvent::ComponentAdded(entity, component_count) => {
+                    let identifier = uid_allocator.get(&entity);
+
+                    transport.send_immediate(crate::event::Event::ComponentAdd(
+                        identifier,
+                        ComponentRecord::new(0, vec![]),
+                    ));
+                    debug!(
+                        "Add component to entity {:?}; component count: {}",
+                        entity, component_count
+                    );
+                }
+                LegionEvent::ComponentRemoved(entity, component_count) => {
+                    let identifier = uid_allocator.get(&entity);
+                    transport.send_immediate(crate::event::Event::ComponentRemoved(identifier));
+                    debug!(
+                        "Remove component from entity {:?}; component count: {}.",
+                        entity, component_count
+                    );
+                }
             }
         }
 
         for modified in self.changed_components() {
+            debug!("Modified {:?}", modified);
+
             let uid = components
                 .get_uid(&modified.type_id)
                 .expect("Type is not registered. Make sure to apply the `sync` attribute.");
@@ -104,15 +137,4 @@ impl EventResource {
             ));
         }
     }
-}
-
-fn get_identifier_component(world: &SubWorld, entity: Entity) -> Uid {
-    world
-        .get_component::<UidComponent>(entity)
-        .expect(
-            "Could not find `UuidComponent`. \
-               This component is needed for tracking purposes. \
-               Make sure to add it to the entity which you are trying to track.",
-        )
-        .uid()
 }

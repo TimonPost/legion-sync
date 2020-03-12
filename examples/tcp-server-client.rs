@@ -1,5 +1,4 @@
 use legion::{filter::filter_fns::any, prelude::*, systems::schedule::Builder};
-use legion_sync::systems::insert_received_entities_system;
 use legion_sync::{
     components::UidComponent,
     filters::filter_fns::{all, modified, removed},
@@ -9,8 +8,9 @@ use legion_sync::{
         ResourcesExt, SentBufferResource, TrackResource,
     },
     systems::{
+        insert_received_entities_system,
         tcp::{tcp_connection_listener, tcp_receive_system, tcp_sent_system},
-        track_modifications_system,
+        track_modifications_system, SchedulerExt,
     },
     tracking::*,
     ReceivedPacket,
@@ -83,13 +83,11 @@ fn start_client() -> JoinHandle<()> {
         let mut world = universe.create_world();
 
         let tcp_client = TcpClientResource::new("127.0.0.1:1119".parse().unwrap()).unwrap();
-        let mut event_resource = EventResource::new();
-        event_resource.subscribe_to_world(&mut world, any());
 
         let mut resources = Resources::default();
         resources.insert(tcp_client);
-        resources.insert(event_resource);
         resources.insert_client_resources(Bincode, Lz4);
+        resources.insert(EventResource::new(&mut world));
 
         // Custom resource that we need in this example.
         let mut allocator = UidAllocator::new();
@@ -111,7 +109,7 @@ fn start_client() -> JoinHandle<()> {
 /// Initializes the systems needed for TCP network communication receiving entity updates.
 fn initialize_server_systems() -> Schedule {
     Schedule::builder()
-        .add_tcp_listener_systems(Bincode, Lz4)
+        .add_tcp_listener_systems::<Bincode, Lz4>()
         .add_server_systems()
         .add_system(apply_position_modifications_system())
         .add_system(remove_entities_system())

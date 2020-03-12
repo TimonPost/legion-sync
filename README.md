@@ -29,6 +29,17 @@ This library offers an abstraction on top of legion that can synchronize changin
 - [X] Some resources, systems, components which makes entity synchronisation more easier.
 - [X] Extra entity filters.
 
+### Backlog
+- State Model
+- Deterministic Model
+- Lockstep 
+- Delta Encoding
+- Reliable UDP support (laminar)
+- Interest Management
+- Snapshots
+- Interpolation
+- Client Side Perdition
+
 # Examples
 
 Upcomming...

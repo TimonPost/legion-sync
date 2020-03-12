@@ -1,5 +1,6 @@
 use crate::register::ComponentRegistrationRef;
 use legion::{
+    index::ComponentIndex,
     prelude::*,
     storage::{ComponentMeta, ComponentStorage, ComponentTypeId},
 };
@@ -28,12 +29,12 @@ impl legion::world::CloneImpl for CopyCloneImpl {
 
     fn clone_components(
         &self,
-        src_world: &World,
-        src_component_storage: &ComponentStorage,
-        src_component_storage_indexes: core::ops::Range<usize>,
+        _src_world: &World,
+        _src_component_storage: &ComponentStorage,
+        _src_component_storage_indexes: core::ops::Range<ComponentIndex>,
         src_type: ComponentTypeId,
-        src_entities: &[Entity],
-        dst_entities: &[Entity],
+        _src_entities: &[Entity],
+        _dst_entities: &[Entity],
         src_data: *const u8,
         dst_data: *mut u8,
         num_components: usize,

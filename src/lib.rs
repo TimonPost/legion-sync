@@ -8,11 +8,13 @@ pub mod clone_merge;
 pub mod components;
 pub mod error;
 pub mod filters;
-pub mod network_universe;
+
 pub mod resources;
 pub mod systems;
 #[macro_use]
 pub mod register;
+
+pub mod universe;
 
 pub mod tracking {
     //! Re-export of the [track](LINK) crate.

@@ -1,5 +1,4 @@
 use crate::Event;
-use net_sync::uid::Uid;
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 

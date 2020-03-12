@@ -1,7 +1,8 @@
 use legion::{
     command::CommandBuffer,
+    prelude::Entity,
     storage::{ComponentMeta, ComponentTypeId},
-    systems::SystemBuilder,
+    systems::{SubWorld, SystemBuilder},
 };
 use net_sync::uid::{Uid, UidAllocator};
 use serde::{
@@ -29,6 +30,7 @@ pub struct ComponentRegistration {
     pub(crate) meta: ComponentMeta,
     pub(crate) type_name: &'static str,
     pub(crate) comp_clone_fn: fn(*const u8, *mut u8, usize),
+    pub(crate) exists_in_entity: fn(world: &SubWorld, entity: Entity) -> bool,
     pub(crate) serialize_if_in_entity: Arc<
         dyn Fn(
                 &legion::systems::SubWorld,
@@ -75,6 +77,14 @@ impl ComponentRegistration {
         (&*self.deserialize_single_fn)(command_buffer, entity, data)
     }
 
+    pub fn exists_in_entity(
+        &self,
+        world: &legion::systems::SubWorld,
+        entity: legion::entity::Entity,
+    ) -> bool {
+        (&self.exists_in_entity)(world, entity)
+    }
+
     pub fn serialize_if_in_entity(
         &self,
         world: &legion::systems::SubWorld,
@@ -115,6 +125,11 @@ impl ComponentRegistration {
                     std::ptr::write(dst_ptr, <T as Clone>::clone(&*src_ptr));
                 }
             },
+            exists_in_entity: |world, entity| -> bool {
+                // TODO: World supports a check if an component is in an entity.
+                // Maybe we should open A PR for allowing this via the system world as well.
+                world.get_component::<T>(entity).is_some()
+            },
             serialize_if_in_entity: Arc::new(
                 move |world, entity| -> Result<Option<Vec<u8>>, ErrorKind> {
                     if let Some(component) = world.get_component::<T>(entity) {
@@ -154,7 +169,7 @@ impl ComponentRegister {
         let mut registered_components = HashMap::new();
 
         for component in ComponentRegister.iter() {
-            let id = uid_allocator.allocate(None);
+            let id = uid_allocator.allocate(component.ty(), None);
             registered_components.insert(id, component);
         }
 

@@ -34,13 +34,9 @@ fn main() {
     let universe = Universe::new();
     let mut world = universe.create_world();
 
-    let mut event_resource = EventResource::new();
-
-    world.subscribe(event_resource.legion_subscriber().clone(), any());
-
     let mut resources = Resources::default();
     resources.insert(SentBufferResource::new());
-    resources.insert(event_resource);
+    resources.insert(EventResource::new(&mut world));
     resources.insert(RegisteredComponentsResource::new());
 
     world.insert(

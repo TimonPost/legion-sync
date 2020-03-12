@@ -1,12 +1,12 @@
 use crate::register::{ComponentRegister, ComponentRegistrationRef};
 use net_sync::uid::Uid;
-use std::any::TypeId;
-use std::hash::Hash;
 use std::{
+    any::TypeId,
     collections::{
         hash_map::{self},
         HashMap,
     },
+    hash::Hash,
     slice,
     sync::{Arc, Mutex, MutexGuard},
 };
