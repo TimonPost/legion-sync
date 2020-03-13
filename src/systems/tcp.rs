@@ -1,26 +1,28 @@
-use crate::{
-    resources::{
-        tcp::{TcpClientResource, TcpListenerResource},
-        BufferResource, Packer, ReceiveBufferResource, SentBufferResource, TrackResource,
-    },
-    Event, ReceivedPacket, SentPacket,
+use crate::resources::{
+    tcp::{TcpClientResource, TcpListenerResource},
+    BufferResource, Packer, PostBoxResource, PostOfficeResource, TrackResource,
 };
 use legion::prelude::{Schedulable, SystemBuilder};
 use log::{debug, warn};
-use net_sync::compression::CompressionStrategy;
+use net_sync::{
+    compression::CompressionStrategy,
+    transport::{PostBox, PostOffice, ReceivedPacket, SentPacket},
+    Event,
+};
 use std::{io, io::Read};
 use track::serialization::SerializationStrategy;
 
 pub fn tcp_connection_listener() -> Box<dyn Schedulable> {
     SystemBuilder::new("tcp_connection_listener")
         .write_resource::<TcpListenerResource>()
+        .write_resource::<PostOfficeResource>()
         .build(|_, _, resources, _| {
-            if !resources.get().is_some() {
+            if !resources.0.get().is_some() {
                 return;
             }
 
             loop {
-                let (stream, addr) = match resources.get().unwrap().accept() {
+                let (stream, addr) = match resources.0.get().unwrap().accept() {
                     Ok((stream, addr)) => {
                         stream
                             .set_nonblocking(true)
@@ -41,7 +43,8 @@ pub fn tcp_connection_listener() -> Box<dyn Schedulable> {
                     }
                 };
 
-                resources.register_stream(addr, stream);
+                resources.0.register_stream(addr, stream);
+                resources.1.register_client(addr);
             }
         })
 }
@@ -50,13 +53,13 @@ pub fn tcp_receive_system<S: SerializationStrategy + 'static, C: CompressionStra
 ) -> Box<dyn Schedulable> {
     SystemBuilder::new("tcp_receive_system")
         .write_resource::<TcpListenerResource>()
-        .write_resource::<ReceiveBufferResource>()
+        .write_resource::<PostOfficeResource>()
         .read_resource::<Packer<S, C>>()
         .write_resource::<BufferResource>()
         .write_resource::<TrackResource>()
         .build(|_, _, resources, _| {
             let tcp = &mut resources.0;
-            let receive_queue = &mut resources.1;
+            let mut postoffice = &mut resources.1;
             let unpacker = &resources.2;
             let recv_buffer = &mut resources.3.recv_buffer;
             let tracker = &mut resources.4;
@@ -82,6 +85,11 @@ pub fn tcp_receive_system<S: SerializationStrategy + 'static, C: CompressionStra
                                     "Received {} bytes from TCP stream: {:?}.",
                                     recv_len, peer_addr
                                 );
+
+                                let mut client = postoffice
+                                    .clients_mut()
+                                    .by_addr_mut(&peer_addr)
+                                    .expect("Client should exist");
 
                                 match unpacker
                                     .compression()
@@ -114,14 +122,16 @@ pub fn tcp_receive_system<S: SerializationStrategy + 'static, C: CompressionStra
                                                             }
                                                         }
 
-                                                        receive_queue.push(ReceivedPacket::new(peer_addr, p));
+                                                        client
+                                                            .postbox_mut()
+                                                            .add_to_inbox(p.event().clone());
                                                     })
                                                     .collect::<()>();
                                             }
                                             Err(e) => {
                                                 warn!("Error occurred when deserializing TCP-packet. Reason: {:?}", e);
                                             }
-                                        }
+                                        };
                                     }
                                     Err(e) => {
                                         warn!("Error occurred when decompressing TCP-packet. Reason: {:?}", e);
@@ -138,11 +148,12 @@ pub fn tcp_receive_system<S: SerializationStrategy + 'static, C: CompressionStra
                                     *active = false;
                                 }
                                 io::ErrorKind::WouldBlock => {}
-                                _ => {}
-                            }
+                                _ => { }
+                            };
+
                             break;
                         }
-                    }
+                    };
                 }
             }
         })
@@ -152,32 +163,34 @@ pub fn tcp_sent_system<S: SerializationStrategy + 'static, C: CompressionStrateg
 ) -> Box<dyn Schedulable> {
     SystemBuilder::new("tcp_sent_system")
         .write_resource::<TcpClientResource>()
-        .write_resource::<SentBufferResource>()
+        .write_resource::<PostBoxResource>()
         .read_resource::<Packer<S, C>>()
         .build(|_, _, resources, _| {
-            let client = &mut resources.0;
-            let sent_buffer = &mut resources.1;
+            let tcp_client: &mut TcpClientResource = &mut resources.0;
+            let mut postbox: &mut PostBox = &mut resources.1;
             let packer = &resources.2;
 
-            let data = sent_buffer
-                .drain_messages(|_| true)
-                .into_iter()
-                .map(|message| SentPacket::new(message.event()))
-                .collect::<Vec<SentPacket>>();
+            if !postbox.empty_outgoing() {
+                let packets = postbox
+                    .drain_outgoing_with_priority(|_| true)
+                    .into_iter()
+                    .map(|message| SentPacket::new(message.event()))
+                    .collect::<Vec<SentPacket>>();
 
-            match &packer.serialization().serialize(&data) {
-                Ok(serialized) => {
-                    let compressed = packer.compression().compress(&serialized);
+                match &packer.serialization().serialize(&packets) {
+                    Ok(serialized) => {
+                        let compressed = packer.compression().compress(&serialized);
 
-                    if let Err(e) = client.sent(&compressed) {
-                        warn!("Error occurred when sending TCP-packet. Reason: {:?}", e);
+                        if let Err(e) = tcp_client.sent(&compressed) {
+                            warn!("Error occurred when sending TCP-packet. Reason: {:?}", e);
+                        }
                     }
-                }
-                Err(e) => {
-                    warn!(
-                        "Error occurred when serializing TCP-packet. Reason: {:?}",
-                        e
-                    );
+                    Err(e) => {
+                        warn!(
+                            "Error occurred when serializing TCP-packet. Reason: {:?}",
+                            e
+                        );
+                    }
                 }
             }
         })

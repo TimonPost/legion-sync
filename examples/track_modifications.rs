@@ -3,7 +3,7 @@ use legion::prelude::{
 };
 use legion_sync::{
     components::UidComponent,
-    resources::{EventResource, RegisteredComponentsResource, SentBufferResource},
+    resources::{EventResource, PostOfficeResource, RegisteredComponentsResource},
     systems::track_modifications_system,
     tracking::*,
 };
@@ -35,7 +35,7 @@ fn main() {
     let mut world = universe.create_world();
 
     let mut resources = Resources::default();
-    resources.insert(SentBufferResource::new());
+    resources.insert(PostOfficeResource::new());
     resources.insert(EventResource::new(&mut world));
     resources.insert(RegisteredComponentsResource::new());
 
@@ -72,7 +72,7 @@ pub fn make_modification_system() -> Box<dyn Schedulable> {
 
 pub fn watch_modifications_system() -> Box<dyn Schedulable> {
     SystemBuilder::new("read_received_system")
-        .write_resource::<SentBufferResource>()
+        .write_resource::<PostOfficeResource>()
         .build(|_, _, sent_buffer, _| {
             for message in sent_buffer.drain_messages(|_| true).into_iter() {
                 print!("urgency: {:?} \t| ", message.urgency());

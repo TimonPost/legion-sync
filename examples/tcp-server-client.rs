@@ -4,8 +4,8 @@ use legion_sync::{
     filters::filter_fns::{all, modified, removed},
     resources::{
         tcp::{TcpClientResource, TcpListenerResource},
-        BufferResource, EventResource, Packer, ReceiveBufferResource, RegisteredComponentsResource,
-        ResourcesExt, SentBufferResource, TrackResource,
+        BufferResource, EventResource, Packer, PostOfficeResource, ReceiveBufferResource,
+        RegisteredComponentsResource, ResourcesExt, TrackResource,
     },
     systems::{
         insert_received_entities_system,

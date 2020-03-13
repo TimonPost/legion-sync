@@ -1,19 +1,17 @@
-use crate::resources::{EventResource, RegisteredComponentsResource, SentBufferResource};
+use crate::{
+    resources::{EventResource, PostBoxResource, PostOfficeResource, RegisteredComponentsResource},
+    systems::SystemBuilderExt,
+};
 use legion::prelude::{Entity, Schedulable, SystemBuilder};
-use net_sync::uid::UidAllocator;
+use net_sync::{transport::PostOffice, uid::UidAllocator};
 
 /// This system picks up all the changes since the last tick.
 ///
 /// The modifications are retrieved from [EventListenerResource](LINK) and written to [TransportResource](LINK).
 pub fn track_modifications_system() -> Box<dyn Schedulable> {
-    let mut builder = SystemBuilder::new("track_modifications_system");
-
-    for component in RegisteredComponentsResource::new().slice_with_uid().iter() {
-        builder = component.1.add_to_system(builder);
-    }
-
-    builder
-        .write_resource::<SentBufferResource>()
+    SystemBuilder::new("track_modifications_system")
+        .read_registered_components()
+        .write_resource::<PostBoxResource>()
         .read_resource::<EventResource>()
         .read_resource::<RegisteredComponentsResource>()
         .write_resource::<UidAllocator<Entity>>()

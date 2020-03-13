@@ -10,6 +10,8 @@ pub mod tcp;
 mod track;
 
 pub use self::{insert::insert_received_entities_system, track::track_modifications_system};
+use crate::resources::RegisteredComponentsResource;
+use legion::prelude::SystemBuilder;
 
 pub trait SchedulerExt {
     fn add_server_systems(self) -> Builder;
@@ -60,5 +62,28 @@ impl SchedulerExt for Builder {
         self,
     ) -> Builder {
         self.add_system(tcp_sent_system::<S, C>())
+    }
+}
+
+pub trait SystemBuilderExt {
+    fn read_registered_components(self) -> SystemBuilder;
+    fn write_registered_components(self) -> SystemBuilder;
+}
+
+impl SystemBuilderExt for SystemBuilder {
+    fn read_registered_components(self) -> SystemBuilder {
+        let mut builder = self;
+        for component in RegisteredComponentsResource::new().slice_with_uid().iter() {
+            builder = component.1.add_read_to_system(builder);
+        }
+        builder
+    }
+
+    fn write_registered_components(mut self) -> SystemBuilder {
+        let mut builder = self;
+        for component in RegisteredComponentsResource::new().slice_with_uid().iter() {
+            builder = component.1.add_write_to_system(builder);
+        }
+        builder
     }
 }

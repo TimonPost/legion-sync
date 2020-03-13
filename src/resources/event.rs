@@ -1,17 +1,21 @@
 use legion::{prelude::Event, systems::SubWorld};
 
 use crate::{
+    components::UidComponent,
     event::{LegionEvent, LegionEventHandler},
     filters::filter_fns::registered,
-    resources::{RegisteredComponentsResource, SentBufferResource},
-    transport::ComponentRecord,
+    resources::{PostOfficeResource, RegisteredComponentsResource},
 };
 use legion::{
     filter::EntityFilter,
     prelude::{Entity, World},
 };
 use log::debug;
-use net_sync::uid::{Uid, UidAllocator};
+use net_sync::{
+    transport::{ComponentRecord, PostBox},
+    uid::{Uid, UidAllocator},
+};
+use std::any::{Any, TypeId};
 use track::{
     re_exports::crossbeam_channel::{unbounded, Receiver, Sender, TryIter},
     ModificationChannel, ModificationEvent,
@@ -62,7 +66,7 @@ impl EventResource {
 
     pub fn gather_events(
         &self,
-        transport: &mut SentBufferResource,
+        transport: &mut PostBox,
         components: &RegisteredComponentsResource,
         uid_allocator: &mut UidAllocator<Entity>,
         world: &mut SubWorld,
@@ -80,6 +84,11 @@ impl EventResource {
                     let mut serialized_components: Vec<ComponentRecord> = Vec::new();
 
                     for component in components.slice_with_uid().iter() {
+                        // do not sent uid components, as the server will append it's onw.
+                        if component.1.ty() == TypeId::of::<UidComponent>() {
+                            continue;
+                        }
+
                         if let Some(data) =
                             component.1.serialize_if_in_entity(world, entity).unwrap()
                         {
@@ -88,7 +97,7 @@ impl EventResource {
                         }
                     }
 
-                    transport.send_immediate(crate::event::Event::EntityInserted(
+                    transport.send_immediate(net_sync::Event::EntityInserted(
                         identifier,
                         serialized_components,
                     ));
@@ -99,12 +108,12 @@ impl EventResource {
                     let identifier = uid_allocator
                         .deallocate(entity)
                         .expect("Entity should be allocated.");
-                    transport.send_immediate(crate::event::Event::EntityRemoved(Uid(identifier)));
+                    transport.send_immediate(net_sync::Event::EntityRemoved(Uid(identifier)));
                 }
                 LegionEvent::ComponentAdded(entity, component_count) => {
                     let identifier = uid_allocator.get(&entity);
 
-                    transport.send_immediate(crate::event::Event::ComponentAdd(
+                    transport.send_immediate(net_sync::Event::ComponentAdd(
                         identifier,
                         ComponentRecord::new(0, vec![]),
                     ));
@@ -115,7 +124,7 @@ impl EventResource {
                 }
                 LegionEvent::ComponentRemoved(entity, component_count) => {
                     let identifier = uid_allocator.get(&entity);
-                    transport.send_immediate(crate::event::Event::ComponentRemoved(identifier));
+                    transport.send_immediate(net_sync::Event::ComponentRemoved(identifier));
                     debug!(
                         "Remove component from entity {:?}; component count: {}.",
                         entity, component_count
@@ -131,7 +140,7 @@ impl EventResource {
                 .get_uid(&modified.type_id)
                 .expect("Type is not registered. Make sure to apply the `sync` attribute.");
 
-            transport.send(crate::event::Event::ComponentModified(
+            transport.send(net_sync::Event::ComponentModified(
                 modified.identifier,
                 ComponentRecord::new(uid.0, modified.modified_fields),
             ));

@@ -41,7 +41,8 @@ pub struct ComponentRegistration {
     >,
     pub(crate) deserialize_single_fn:
         Arc<dyn Fn(&CommandBuffer, legion::entity::Entity, &[u8]) + Send + Sync>,
-    pub(crate) add_to_system: fn(SystemBuilder) -> SystemBuilder,
+    pub(crate) add_write_to_system: fn(SystemBuilder) -> SystemBuilder,
+    pub(crate) add_read_to_system: fn(SystemBuilder) -> SystemBuilder,
 }
 
 impl Debug for ComponentRegistration {
@@ -97,8 +98,12 @@ impl ComponentRegistration {
         self.type_id() == component_type.0
     }
 
-    pub fn add_to_system(&self, system_builder: SystemBuilder) -> SystemBuilder {
-        (self.add_to_system)(system_builder)
+    pub fn add_read_to_system(&self, system_builder: SystemBuilder) -> SystemBuilder {
+        (self.add_read_to_system)(system_builder)
+    }
+
+    pub fn add_write_to_system(&self, system_builder: SystemBuilder) -> SystemBuilder {
+        (self.add_write_to_system)(system_builder)
     }
 
     pub unsafe fn clone_components(&self, src: *const u8, dst: *mut u8, num_components: usize) {
@@ -146,7 +151,8 @@ impl ComponentRegistration {
 
                 command_buffer.add_component(entity, comp);
             }),
-            add_to_system: |system_builder| system_builder.read_component::<T>(),
+            add_read_to_system: |system_builder| system_builder.read_component::<T>(),
+            add_write_to_system: |system_builder| system_builder.write_component::<T>(),
         }
     }
 }

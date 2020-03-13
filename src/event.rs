@@ -1,21 +1,12 @@
 use crate::{
     resources::RegisteredComponentsResource, tracking::re_exports::crossbeam_channel::Receiver,
-    transport::ComponentRecord,
 };
 use legion::{prelude::Entity, systems::SubWorld};
 use net_sync::uid::Uid;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, PartialOrd, PartialEq, Eq, Serialize, Deserialize)]
-pub enum Event {
-    EntityInserted(Uid, Vec<ComponentRecord>),
-    EntityRemoved(Uid),
-
-    ComponentModified(Uid, ComponentRecord),
-    ComponentRemoved(Uid),
-    ComponentAdd(Uid, ComponentRecord),
-}
+pub use net_sync::Event;
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, Hash)]
 pub enum LegionEvent {

@@ -1,7 +1,7 @@
 //! A number of resources that can be used to synchronize and trace components.
 
 pub use self::{
-    buffer::{BufferResource, ReceiveBufferResource, SentBufferResource},
+    buffer::{BufferResource, PostBoxResource, PostOfficeResource},
     component::RegisteredComponentsResource,
     event::EventResource,
     packer::Packer,
@@ -65,10 +65,9 @@ impl ResourcesExt for Resources {
         compression: C,
     ) {
         self.insert(TrackResource::new());
-        self.insert(ReceiveBufferResource::default());
-        self.insert(RegisteredComponentsResource::new());
         self.insert(BufferResource::from_capacity(1500));
         self.insert(RemovedEntities::new());
+        self.insert(PostOfficeResource::new());
         self.insert_required(serialization, compression);
     }
 
@@ -80,7 +79,6 @@ impl ResourcesExt for Resources {
         serialization: S,
         compression: C,
     ) {
-        self.insert(SentBufferResource::new());
         self.insert_required(serialization, compression);
     }
 
@@ -91,10 +89,11 @@ impl ResourcesExt for Resources {
     ) {
         self.insert(RegisteredComponentsResource::new());
         self.insert(Packer::<S, C>::default());
-        self.insert(UidAllocator::<Entity>::new())
+        self.insert(UidAllocator::<Entity>::new());
     }
 
     fn insert_tcp_client_resources(&mut self, addr: SocketAddr) {
+        self.insert(PostBoxResource::new(addr));
         self.insert(TcpClientResource::new(addr).unwrap());
     }
 

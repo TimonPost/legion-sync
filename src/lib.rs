@@ -1,8 +1,4 @@
-pub use event::Event;
-pub use transport::{ComponentRecord, Message, ReceivedPacket, SentPacket, UrgencyRequirement};
-
 mod event;
-mod transport;
 
 pub mod clone_merge;
 pub mod components;
@@ -15,6 +11,8 @@ pub mod systems;
 pub mod register;
 
 pub mod universe;
+
+pub use net_sync::Event;
 
 pub mod tracking {
     //! Re-export of the [track](LINK) crate.
