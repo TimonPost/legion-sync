@@ -1,9 +1,9 @@
 use crate::{
-    resources::{EventResource, PostBoxResource, PostOfficeResource, RegisteredComponentsResource},
+    resources::{EventResource, PostBoxResource, RegisteredComponentsResource},
     systems::SystemBuilderExt,
 };
 use legion::prelude::{Entity, Schedulable, SystemBuilder};
-use net_sync::{transport::PostOffice, uid::UidAllocator};
+use net_sync::uid::UidAllocator;
 
 /// This system picks up all the changes since the last tick.
 ///
@@ -18,6 +18,6 @@ pub fn track_modifications_system() -> Box<dyn Schedulable> {
         .build(|_, world, resources, _| {
             resources
                 .1
-                .gather_events(&mut resources.0, &resources.2, &mut resources.3, world);
+                .gather_events(&mut *resources.0, &resources.2, &mut resources.3, world);
         })
 }

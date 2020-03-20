@@ -7,18 +7,22 @@ use std::{
 use crate::error::ErrorKind;
 
 pub struct TcpClientResource {
-    socket: TcpStream,
+    stream: TcpStream,
 }
 
 impl TcpClientResource {
     pub fn new(addr: SocketAddr) -> Result<TcpClientResource, ErrorKind> {
         Ok(TcpClientResource {
-            socket: TcpStream::connect(addr)?,
+            stream: TcpStream::connect(addr)?,
         })
     }
 
     pub fn sent(&mut self, data: &[u8]) -> Result<usize, ErrorKind> {
-        Ok(self.socket.write(data)?)
+        Ok(self.stream.write(data)?)
+    }
+
+    pub fn stream(&self) -> &TcpStream {
+        &self.stream
     }
 }
 

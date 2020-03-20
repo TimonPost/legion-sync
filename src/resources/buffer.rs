@@ -1,8 +1,7 @@
-use std::collections::VecDeque;
-
+use crate::ClientMessage;
 use net_sync::{
     transport::{PostBox, PostOffice},
-    uid::Uid,
+    ServerMessage,
 };
 use std::{
     net::SocketAddr,
@@ -66,7 +65,7 @@ impl Default for PostOfficeResource {
 }
 
 pub struct PostBoxResource {
-    postbox: PostBox,
+    postbox: PostBox<ServerMessage, ClientMessage>,
 }
 
 impl PostBoxResource {
@@ -85,7 +84,7 @@ impl DerefMut for PostBoxResource {
 }
 
 impl Deref for PostBoxResource {
-    type Target = PostBox;
+    type Target = PostBox<ServerMessage, ClientMessage>;
 
     fn deref(&self) -> &Self::Target {
         &self.postbox

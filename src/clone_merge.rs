@@ -13,7 +13,7 @@ pub struct CopyCloneImpl {
 }
 
 impl CopyCloneImpl {
-    pub fn new(components: HashMap<ComponentTypeId, ComponentRegistrationRef>) -> Self {
+    pub fn new(components: HashMap<ComponentTypeId, ComponentRegistrationRef>) -> CopyCloneImpl {
         Self { components }
     }
 }
@@ -40,8 +40,7 @@ impl legion::world::CloneImpl for CopyCloneImpl {
         num_components: usize,
     ) {
         let comp_reg = &self.components[&src_type];
-        unsafe {
-            comp_reg.clone_components(src_data, dst_data, num_components);
-        }
+
+        unsafe { comp_reg.clone_components(src_data, dst_data, num_components) };
     }
 }

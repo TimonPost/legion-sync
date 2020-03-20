@@ -9,7 +9,7 @@ use legion_sync::{
     },
     systems::{
         insert_received_entities_system,
-        tcp::{tcp_connection_listener, tcp_receive_system, tcp_sent_system},
+        tcp::{tcp_client_sent_system, tcp_connection_listener, tcp_server_receive_system},
         track_modifications_system, SchedulerExt,
     },
     tracking::*,
@@ -121,7 +121,7 @@ fn initialize_server_systems() -> Schedule {
 fn initialize_client_systems() -> Schedule {
     Schedule::builder()
         .add_client_systems()
-        .add_system(tcp_sent_system::<Bincode, Lz4>())
+        .add_system(tcp_client_sent_system::<Bincode, Lz4>())
         .add_system(make_modification_system())
         .flush()
         .build()
@@ -165,7 +165,7 @@ pub fn apply_position_modifications_system() -> Box<dyn Schedulable> {
                     resource.0.drain_modified(identifier.uid(), *uid);
 
                 for packet in modified_packets.iter() {
-                    if let legion_sync::Event::ComponentModified(_entity_id, record) =
+                    if let legion_sync::ClientMessage::ComponentModified(_entity_id, record) =
                         packet.event()
                     {
                         println!("Modified {:?} from {:?}", *pos, *identifier);

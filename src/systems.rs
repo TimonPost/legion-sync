@@ -2,7 +2,7 @@
 
 use legion::systems::schedule::Builder;
 
-use crate::{systems::tcp::tcp_sent_system, tracking::SerializationStrategy};
+use crate::{systems::tcp::tcp_client_sent_system, tracking::SerializationStrategy};
 use net_sync::compression::CompressionStrategy;
 
 mod insert;
@@ -10,7 +10,7 @@ pub mod tcp;
 mod track;
 
 pub use self::{insert::insert_received_entities_system, track::track_modifications_system};
-use crate::resources::RegisteredComponentsResource;
+use crate::{resources::RegisteredComponentsResource, systems::tcp::tcp_client_receive_system};
 use legion::prelude::SystemBuilder;
 
 pub trait SchedulerExt {
@@ -52,7 +52,7 @@ impl SchedulerExt for Builder {
         self,
     ) -> Builder {
         self.add_system(tcp::tcp_connection_listener())
-            .add_system(tcp::tcp_receive_system::<S, C>())
+            .add_system(tcp::tcp_server_receive_system::<S, C>())
     }
 
     fn add_tcp_client_systems<
@@ -61,7 +61,8 @@ impl SchedulerExt for Builder {
     >(
         self,
     ) -> Builder {
-        self.add_system(tcp_sent_system::<S, C>())
+        self.add_system(tcp_client_sent_system::<S, C>())
+            .add_system(tcp_client_receive_system::<S, C>())
     }
 }
 
@@ -79,7 +80,7 @@ impl SystemBuilderExt for SystemBuilder {
         builder
     }
 
-    fn write_registered_components(mut self) -> SystemBuilder {
+    fn write_registered_components(self) -> SystemBuilder {
         let mut builder = self;
         for component in RegisteredComponentsResource::new().slice_with_uid().iter() {
             builder = component.1.add_write_to_system(builder);

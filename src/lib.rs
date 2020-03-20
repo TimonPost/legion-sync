@@ -12,7 +12,9 @@ pub mod register;
 
 pub mod universe;
 
-pub use net_sync::Event;
+use crate::register::ComponentRegistration;
+use legion::prelude::{Entity, World};
+pub use net_sync::ClientMessage;
 
 pub mod tracking {
     //! Re-export of the [track](LINK) crate.
@@ -30,4 +32,20 @@ pub fn create_copy_clone_impl() -> clone_merge::CopyCloneImpl {
     let component_registry = register::ComponentRegister::by_component_id();
     let clone_merge_impl = clone_merge::CopyCloneImpl::new(component_registry);
     clone_merge_impl
+}
+
+pub trait WorldAbstraction {
+    fn has_component(&self, entity: Entity, component: &ComponentRegistration) -> bool;
+}
+
+impl WorldAbstraction for World {
+    fn has_component(&self, entity: Entity, component: &ComponentRegistration) -> bool {
+        component.exists_in_world(&self, entity)
+    }
+}
+
+impl WorldAbstraction for legion::systems::SubWorld {
+    fn has_component(&self, entity: Entity, component: &ComponentRegistration) -> bool {
+        component.exists_in_subworld(&self, entity)
+    }
 }

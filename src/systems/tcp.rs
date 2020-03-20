@@ -3,11 +3,11 @@ use crate::resources::{
     BufferResource, Packer, PostBoxResource, PostOfficeResource, TrackResource,
 };
 use legion::prelude::{Schedulable, SystemBuilder};
-use log::{debug, warn};
+use log::{debug, error};
 use net_sync::{
     compression::CompressionStrategy,
-    transport::{PostBox, PostOffice, ReceivedPacket, SentPacket},
-    Event,
+    transport::{PostBox, PostOffice, SentPacket},
+    ClientMessage, ServerMessage,
 };
 use std::{io, io::Read};
 use track::serialization::SerializationStrategy;
@@ -37,7 +37,7 @@ pub fn tcp_connection_listener() -> Box<dyn Schedulable> {
                         break;
                     }
                     Err(e) => {
-                        debug!("Error while handling TCP connection: {:?}", e);
+                        error!("Error while handling TCP connection: {:?}", e);
                         // TODO: handle error
                         break;
                     }
@@ -49,8 +49,62 @@ pub fn tcp_connection_listener() -> Box<dyn Schedulable> {
         })
 }
 
-pub fn tcp_receive_system<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
-) -> Box<dyn Schedulable> {
+pub fn tcp_client_receive_system<
+    S: SerializationStrategy + 'static,
+    C: CompressionStrategy + 'static,
+>() -> Box<dyn Schedulable> {
+    SystemBuilder::new("tcp_receive_system")
+        .write_resource::<TcpClientResource>()
+        .write_resource::<BufferResource>()
+        .write_resource::<PostBoxResource>()
+        .read_resource::<Packer<S, C>>()
+        .build(|_, _, resources, _|
+    {
+        let tcp: &mut TcpClientResource = &mut resources.0;
+        let recv_buffer: &mut [u8] = &mut resources.1.recv_buffer;
+        let postbox: &mut PostBox<ServerMessage, ClientMessage> = &mut resources.2;
+        let unpacker: &Packer<S,C> = &resources.3;
+
+        let result = tcp.stream().read(recv_buffer);
+
+        match result {
+            Ok(recv_len) => {
+                match unpacker
+                    .compression()
+                    .decompress(&recv_buffer[..recv_len]) {
+                    Ok(decompressed) => {
+                        match unpacker
+                            .serialization()
+                            .deserialize::<ServerMessage>(&decompressed) {
+                            Ok(deserialized) => {
+                                debug!("Received: {:?}", deserialized);
+                                postbox.add_to_inbox(deserialized)
+                            }
+                            Err(e) => {
+                                error!("Error occurred when deserializing TCP-packet. Reason: {:?}", e);
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Error occurred when decompressing TCP-packet. Reason: {:?}", e);
+                    }
+                }
+            }
+            Err(e) => {
+                match e.kind() {
+                    io::ErrorKind::ConnectionReset => { }
+                    io::ErrorKind::WouldBlock => { }
+                    _ => {}
+                };
+            }
+        }
+    })
+}
+
+pub fn tcp_server_receive_system<
+    S: SerializationStrategy + 'static,
+    C: CompressionStrategy + 'static,
+>() -> Box<dyn Schedulable> {
     SystemBuilder::new("tcp_receive_system")
         .write_resource::<TcpListenerResource>()
         .write_resource::<PostOfficeResource>()
@@ -58,11 +112,11 @@ pub fn tcp_receive_system<S: SerializationStrategy + 'static, C: CompressionStra
         .write_resource::<BufferResource>()
         .write_resource::<TrackResource>()
         .build(|_, _, resources, _| {
-            let tcp = &mut resources.0;
-            let mut postoffice = &mut resources.1;
-            let unpacker = &resources.2;
-            let recv_buffer = &mut resources.3.recv_buffer;
-            let tracker = &mut resources.4;
+            let tcp: &mut TcpListenerResource = &mut resources.0;
+            let postoffice: &mut PostOffice = &mut resources.1;
+            let unpacker: &Packer<S,C> = &resources.2;
+            let recv_buffer: &mut [u8] = &mut resources.3.recv_buffer;
+            let tracker: &mut TrackResource = &mut resources.4;
 
             for (_, (active, stream)) in tcp.iter_mut() {
                 // If we can't get a peer_addr, there is likely something pretty wrong with the
@@ -80,66 +134,65 @@ pub fn tcp_receive_system<S: SerializationStrategy + 'static, C: CompressionStra
 
                     match result {
                         Ok(recv_len) => {
-                            if recv_len > 5 {
-                                debug!(
-                                    "Received {} bytes from TCP stream: {:?}.",
-                                    recv_len, peer_addr
-                                );
-
-                                let mut client = postoffice
-                                    .clients_mut()
-                                    .by_addr_mut(&peer_addr)
-                                    .expect("Client should exist");
-
-                                match unpacker
-                                    .compression()
-                                    .decompress(&recv_buffer[..recv_len]) {
-                                    Ok(decompressed) => {
-                                        match unpacker
-                                            .serialization()
-                                            .deserialize::<Vec<SentPacket>>(&decompressed)  {
-                                            Ok(deserialized) => {
-                                                let _ = deserialized.into_iter()
-                                                    .map(|p: SentPacket| {
-                                                        match p.event() {
-                                                            Event::EntityInserted(entity_id, _) => {
-                                                                debug!("Received Entity Inserted {:?}", entity_id);
-                                                                tracker.insert(entity_id.0 as usize);
-                                                            }
-                                                            Event::ComponentModified(entity_id, _) => {
-                                                                debug!("Received Entity Modified {:?}", entity_id);
-                                                                tracker.modify(entity_id.0 as usize);
-                                                            }
-                                                            Event::EntityRemoved(entity_id) => {
-                                                                debug!("Received Entity Removed {:?}", entity_id);
-                                                                tracker.remove(entity_id.0 as usize);
-                                                            }
-                                                            Event::ComponentRemoved(entity_id) => {
-                                                                debug!("Received Component Removed {:?}", entity_id);
-                                                            }
-                                                            Event::ComponentAdd(entity_id, _) => {
-                                                                debug!("Received Component Add {:?}", entity_id);
-                                                            }
-                                                        }
-
-                                                        client
-                                                            .postbox_mut()
-                                                            .add_to_inbox(p.event().clone());
-                                                    })
-                                                    .collect::<()>();
-                                            }
-                                            Err(e) => {
-                                                warn!("Error occurred when deserializing TCP-packet. Reason: {:?}", e);
-                                            }
-                                        };
-                                    }
-                                    Err(e) => {
-                                        warn!("Error occurred when decompressing TCP-packet. Reason: {:?}", e);
-                                    }
-                                }
-                            } else {
+                            if recv_len < 5 {
                                 *active = false;
                                 break;
+                            }
+
+                            debug!(
+                                "Received {} bytes from TCP stream: {:?}.",
+                                recv_len, peer_addr
+                            );
+
+                            let client = postoffice
+                                .clients_mut()
+                                .by_addr_mut(&peer_addr)
+                                .expect("Client should exist");
+
+                            match unpacker
+                                .compression()
+                                .decompress(&recv_buffer[..recv_len]) {
+                                Ok(decompressed) => {
+                                    match unpacker
+                                        .serialization()
+                                        .deserialize::<Vec<SentPacket>>(&decompressed) {
+                                        Ok(deserialized) => {
+                                            for p in deserialized.into_iter() {
+                                                match p.event() {
+                                                    ClientMessage::EntityInserted(entity_id, _) => {
+                                                        debug!("Received Entity Inserted {:?}", entity_id);
+                                                        tracker.insert(*entity_id as usize);
+                                                    }
+                                                    ClientMessage::ComponentModified(entity_id, _) => {
+                                                        debug!("Received Entity Modified {:?}", entity_id);
+                                                        tracker.modify(*entity_id as usize);
+                                                    }
+                                                    ClientMessage::EntityRemoved(entity_id) => {
+                                                        debug!("Received Entity Removed {:?}", entity_id);
+                                                        tracker.remove(*entity_id as usize);
+                                                    }
+                                                    ClientMessage::ComponentRemoved(entity_id) => {
+                                                        debug!("Received Component Removed {:?}", entity_id);
+                                                    }
+                                                    ClientMessage::ComponentAdd(entity_id, _) => {
+                                                        debug!("Received Component Add {:?}", entity_id);
+                                                    }
+                                                }
+
+                                                client
+                                                    .postbox_mut()
+                                                    .add_to_inbox(p.event().clone());
+                                            }
+
+                                        }
+                                        Err(e) => {
+                                            error!("Error occurred when deserializing TCP-packet. Reason: {:?}", e);
+                                        }
+                                    };
+                                }
+                                Err(e) => {
+                                    error!("Error occurred when decompressing TCP-packet. Reason: {:?}", e);
+                                }
                             }
                         }
                         Err(e) => {
@@ -159,15 +212,17 @@ pub fn tcp_receive_system<S: SerializationStrategy + 'static, C: CompressionStra
         })
 }
 
-pub fn tcp_sent_system<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
-) -> Box<dyn Schedulable> {
+pub fn tcp_client_sent_system<
+    S: SerializationStrategy + 'static,
+    C: CompressionStrategy + 'static,
+>() -> Box<dyn Schedulable> {
     SystemBuilder::new("tcp_sent_system")
         .write_resource::<TcpClientResource>()
         .write_resource::<PostBoxResource>()
         .read_resource::<Packer<S, C>>()
         .build(|_, _, resources, _| {
             let tcp_client: &mut TcpClientResource = &mut resources.0;
-            let mut postbox: &mut PostBox = &mut resources.1;
+            let postbox: &mut PostBox<ServerMessage, ClientMessage> = &mut resources.1;
             let packer = &resources.2;
 
             if !postbox.empty_outgoing() {
@@ -182,16 +237,31 @@ pub fn tcp_sent_system<S: SerializationStrategy + 'static, C: CompressionStrateg
                         let compressed = packer.compression().compress(&serialized);
 
                         if let Err(e) = tcp_client.sent(&compressed) {
-                            warn!("Error occurred when sending TCP-packet. Reason: {:?}", e);
+                            error!("Error occurred when sending TCP-packet. Reason: {:?}", e);
                         }
                     }
                     Err(e) => {
-                        warn!(
+                        error!(
                             "Error occurred when serializing TCP-packet. Reason: {:?}",
                             e
                         );
                     }
                 }
             }
+        })
+}
+
+pub fn tcp_server_sent_system<
+    S: SerializationStrategy + 'static,
+    C: CompressionStrategy + 'static,
+>() -> Box<dyn Schedulable> {
+    SystemBuilder::new("tcp_receive_system")
+        .write_resource::<PostOfficeResource>()
+        .build(|_, _, _, _| {
+            //            let tcp: &mut TcpListenerResource = &mut resources.0;
+            //            let mut postoffice: &mut PostOffice = &mut resources.1;
+            //            let unpacker: &Packer<S,C> = &resources.2;
+            //            let recv_buffer: &mut [u8] = &mut resources.3.recv_buffer;
+            //            let tracker: &mut TrackResource = &mut resources.4;
         })
 }

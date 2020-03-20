@@ -1,5 +1,5 @@
 use crate::{
-    resources::{ResourcesExt, TickResource},
+    resources::{EventResource, ResourcesExt, TickResource},
     systems::SchedulerExt,
     tracking::SerializationStrategy,
     universe::{
@@ -11,7 +11,7 @@ use legion::{
     prelude::{Resources, Universe},
     systems::{resource::Resource, schedule::Builder},
 };
-use net_sync::compression::CompressionStrategy;
+use net_sync::{compression::CompressionStrategy, state::WorldState};
 use std::net::TcpListener;
 
 pub struct ServerConfig {
@@ -72,7 +72,7 @@ impl UniverseBuilder for ServerUniverseBuilder {
         F: Fn(Builder) -> Builder,
     {
         let mut s = self;
-        s.main_builder = builder(Builder::default());
+        s.main_builder = builder(s.main_builder);
         s
     }
 
@@ -81,20 +81,24 @@ impl UniverseBuilder for ServerUniverseBuilder {
         F: Fn(Builder) -> Builder,
     {
         let mut s = self;
-        s.remote_builder = builder(Builder::default());
+        s.remote_builder = builder(s.remote_builder);
         s
     }
 
     fn build(self) -> Self::BuildResult {
+        let mut s = self;
+
         let universe = Universe::new();
-        let main_world = universe.create_world();
+        let mut main_world = universe.create_world();
         let remote_world = universe.create_world();
 
-        let main_world = WorldInstance::new(main_world, self.main_builder.build());
-        let remote_world = WorldInstance::new(remote_world, self.remote_builder.build());
+        s.resources.insert(EventResource::new(&mut main_world));
+
+        let main_world = WorldInstance::new(main_world, s.main_builder.build());
+        let remote_world = WorldInstance::new(remote_world, s.remote_builder.build());
 
         ServerUniverse::new(
-            self.resources,
+            s.resources,
             NetworkUniverse::new(universe, main_world, remote_world),
         )
     }
@@ -140,7 +144,8 @@ impl ServerUniverse {
         let server_tick = resources.get_mut::<TickResource>().unwrap().tick();
 
         if server_tick % 10 == 0 {
-            self.universe.merge_into(resources);
+            let mut world_state = WorldState::new();
+            self.universe.merge_into(resources, &mut world_state);
         }
 
         resources.get_mut::<TickResource>().unwrap().increment();

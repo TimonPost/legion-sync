@@ -14,6 +14,7 @@ use crate::{
 };
 use legion::prelude::{Entity, Resources};
 use net_sync::{compression::CompressionStrategy, uid::UidAllocator};
+use std::collections::vec_deque::Drain;
 use std::{
     collections::{vec_deque::Iter, VecDeque},
     net::{SocketAddr, TcpListener},
@@ -65,7 +66,6 @@ impl ResourcesExt for Resources {
         compression: C,
     ) {
         self.insert(TrackResource::new());
-        self.insert(BufferResource::from_capacity(1500));
         self.insert(RemovedEntities::new());
         self.insert(PostOfficeResource::new());
         self.insert_required(serialization, compression);
@@ -87,6 +87,7 @@ impl ResourcesExt for Resources {
         __serialization: S,
         __compression: C,
     ) {
+        self.insert(BufferResource::from_capacity(1500));
         self.insert(RegisteredComponentsResource::new());
         self.insert(Packer::<S, C>::default());
         self.insert(UidAllocator::<Entity>::new());
@@ -119,5 +120,9 @@ impl RemovedEntities {
 
     pub fn iter(&self) -> Iter<Entity> {
         self.removed.iter()
+    }
+
+    pub fn drain(&mut self) -> Drain<'_, Entity> {
+        self.removed.drain(0..self.removed.len())
     }
 }

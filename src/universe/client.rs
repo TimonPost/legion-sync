@@ -1,3 +1,4 @@
+use crate::resources::PostBoxResource;
 use crate::{
     resources::{EventResource, ResourcesExt, TickResource},
     systems::SchedulerExt,
@@ -11,9 +12,12 @@ use legion::{
     prelude::{Entity, Resources, Universe},
     systems::{resource::Resource, schedule::Builder},
 };
+use net_sync::transport::PostBox;
 use net_sync::{
     compression::CompressionStrategy,
+    state::WorldState,
     uid::{Uid, UidAllocator},
+    ClientMessage, ServerMessage,
 };
 use std::net::SocketAddr;
 
@@ -41,9 +45,22 @@ impl ClientUniverse {
         self.universe.main.execute(resources);
 
         let tick = resources.get_mut::<TickResource>().unwrap().tick();
+        let mut postbox = resources.get_mut::<PostBoxResource>().unwrap();
 
         if tick % 10 == 0 {
-            self.universe.merge_into(resources);
+            let inbox = postbox.drain_inbox(|m| match m {
+                ServerMessage::StateUpdate(_) => true,
+                _ => false,
+            });
+
+            for packet in inbox {
+                match packet {
+                    ServerMessage::StateUpdate(update) => {}
+                }
+            }
+
+            let mut world_state = WorldState::new();
+            self.universe.merge_into(resources, &mut world_state);
         }
 
         resources.get_mut::<TickResource>().unwrap().increment();
@@ -90,7 +107,6 @@ impl UniverseBuilder for ClientUniverseBuilder {
 
     fn default_systems(self) -> Self {
         let mut s = self;
-        //        s.remote_builder = s.remote_builder.add_client_systems();
         s
     }
 
@@ -105,7 +121,8 @@ impl UniverseBuilder for ClientUniverseBuilder {
         F: Fn(Builder) -> Builder,
     {
         let mut s = self;
-        s.main_builder = builder(Builder::default().add_client_systems());
+        s.main_builder = s.main_builder.add_client_systems();
+        s.main_builder = builder(s.main_builder);
         s
     }
 

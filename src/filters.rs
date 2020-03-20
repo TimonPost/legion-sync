@@ -123,6 +123,7 @@ impl<'a, F: TrackResourceFilter> Filter<ChunkFilterData<'a>> for TrackFilter<'_,
         let component_id = ComponentTypeId::of::<UidComponent>();
 
         let components = item.components(component_id);
+
         if components.is_none() {
             return Some(false);
         }
@@ -131,7 +132,7 @@ impl<'a, F: TrackResourceFilter> Filter<ChunkFilterData<'a>> for TrackFilter<'_,
 
         unsafe {
             let raw = &components.data_slice::<UidComponent>()[0];
-            Some(self.filter.filter(&self.cash, raw.uid().0 as usize))
+            Some(self.filter.filter(&self.cash, raw.uid() as usize))
         }
     }
 }
@@ -227,7 +228,7 @@ pub mod test {
     use crate::{
         components::UidComponent,
         filters::{
-            filter_fns::{all, modified, registered, removed},
+            filter_fns::{all, modified, removed},
             AllFilter, ModifiedFilter, RegisteredComponentFilter, RemovedFilter,
             TrackResourceFilter,
         },
@@ -239,7 +240,6 @@ pub mod test {
         filter::*,
         prelude::{IntoQuery, Read, Universe, World},
     };
-    use net_sync::uid::Uid;
     use std::collections::HashSet;
 
     #[test]
@@ -270,25 +270,25 @@ pub mod test {
 
     #[test]
     fn all_filter_should_fail_test() {
-        let mut resource = TrackResource::new();
+        let resource = TrackResource::new();
         assert_eq!(AllFilter.filter(&resource, 1), false);
     }
 
     #[test]
     fn modified_filter_should_fail_test() {
-        let mut resource = TrackResource::new();
+        let resource = TrackResource::new();
         assert_eq!(ModifiedFilter.filter(&resource, 1), false);
     }
 
     #[test]
     fn removed_filter_should_fail_test() {
-        let mut resource = TrackResource::new();
+        let resource = TrackResource::new();
         assert_eq!(RemovedFilter.filter(&resource, 1), false);
     }
 
     #[test]
     fn filter_modified_query() {
-        let (universe, world) = get_world();
+        let (_, world) = get_world();
 
         let query = <Read<UidComponent>>::query();
 
@@ -301,19 +301,19 @@ pub mod test {
         let pass_query = query.clone().filter(modified(&track_resource));
 
         for modified in pass_query.iter(&world) {
-            assert_eq!(modified.uid().id(), 1);
+            assert_eq!(modified.uid(), 1);
         }
 
         let empty_query = query.clone().filter(modified(&empty_resource));
 
-        for modified in empty_query.iter(&world) {
+        for _ in empty_query.iter(&world) {
             assert!(false);
         }
     }
 
     #[test]
     fn filter_removed_query() {
-        let (universe, world) = get_world();
+        let (_, world) = get_world();
 
         let query = <Read<UidComponent>>::query();
 
@@ -326,19 +326,19 @@ pub mod test {
         let pass_query = query.clone().filter(removed(&track_resource));
 
         for modified in pass_query.iter(&world) {
-            assert_eq!(modified.uid().id(), 1);
+            assert_eq!(modified.uid(), 1);
         }
 
         let empty_query = query.clone().filter(removed(&empty_resource));
 
-        for modified in empty_query.iter(&world) {
+        for _ in empty_query.iter(&world) {
             assert!(false);
         }
     }
 
     #[test]
     fn filter_all_query() {
-        let (universe, world) = get_world();
+        let (_, world) = get_world();
 
         let query = <Read<UidComponent>>::query();
 
@@ -351,12 +351,12 @@ pub mod test {
         let pass_query = query.clone().filter(all(&track_resource));
 
         for modified in pass_query.iter(&world) {
-            assert_eq!(modified.uid().id(), 1);
+            assert_eq!(modified.uid(), 1);
         }
 
         let empty_query = query.clone().filter(all(&empty_resource));
 
-        for modified in empty_query.iter(&world) {
+        for _ in empty_query.iter(&world) {
             assert!(false);
         }
     }
@@ -367,7 +367,7 @@ pub mod test {
         struct B;
         struct C;
 
-        let (universe, mut world) = get_world();
+        let (_, mut world) = get_world();
 
         world.insert((), vec![(A,)]);
         world.insert((), vec![(B,)]);
@@ -389,15 +389,15 @@ pub mod test {
 
         let mut count = 0;
 
-        for component in a_query.iter(&world) {
+        for _ in a_query.iter(&world) {
             count += 1;
         }
 
-        for component in b_query.iter(&world) {
+        for _ in b_query.iter(&world) {
             count += 1;
         }
 
-        for component in c_query.iter(&world) {
+        for _ in c_query.iter(&world) {
             count += 1;
         }
 
@@ -409,7 +409,7 @@ pub mod test {
         struct A;
 
         let (tx, rx) = crate::tracking::re_exports::crossbeam_channel::unbounded::<Event>();
-        let (universe, mut world) = get_world();
+        let (_universe, mut world) = get_world();
 
         let mut registered = HashSet::new();
         registered.insert(ComponentTypeId::of::<A>());
@@ -456,7 +456,7 @@ pub mod test {
         let universe = Universe::new();
         let mut world = universe.create_world();
 
-        world.insert((), vec![(UidComponent::new(Uid(1)),)]);
+        world.insert((), vec![(UidComponent::new(1),)]);
 
         (universe, world)
     }
