@@ -109,7 +109,7 @@ fn start_client() -> JoinHandle<()> {
 /// Initializes the systems needed for TCP network communication receiving entity updates.
 fn initialize_server_systems() -> Schedule {
     Schedule::builder()
-        .add_tcp_listener_systems::<Bincode, Lz4>()
+        .add_tcp_server_systems::<Bincode, Lz4>()
         .add_server_systems()
         .add_system(apply_position_modifications_system())
         .add_system(remove_entities_system())

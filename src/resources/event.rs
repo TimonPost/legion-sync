@@ -1,10 +1,16 @@
 use legion::{prelude::Event, systems::SubWorld};
 
+use crate::filters::TrackResourceFilter;
+use crate::resources::TrackResource;
+use crate::universe::network::WorldMappingResource;
 use crate::{
     components::UidComponent,
     event::{LegionEvent, LegionEventHandler},
     filters::filter_fns::registered,
     resources::RegisteredComponentsResource,
+};
+use legion::filter::{
+    ArchetypeFilterData, ChunkFilterData, ChunksetFilterData, EntityFilterTuple, Filter,
 };
 use legion::{
     filter::EntityFilter,
@@ -16,23 +22,31 @@ use net_sync::{
     uid::{Uid, UidAllocator},
     ClientMessage, ComponentData, ServerMessage,
 };
-use std::any::TypeId;
+use std::any::{Any, TypeId};
 use track::{
     re_exports::crossbeam_channel::{unbounded, Receiver, Sender, TryIter},
     ModificationChannel, ModificationEvent,
 };
 
 pub struct EventResource {
-    modification_channel: ModificationChannel<Uid>,
-    legion_events_tx: Sender<Event>,
-    legion_events_rx: Receiver<Event>,
+    pub(crate) modification_channel: ModificationChannel<Uid>,
+    pub(crate) legion_events_tx: Sender<Event>,
+    pub(crate) legion_events_rx: Receiver<Event>,
 }
 
 impl EventResource {
-    pub fn new(world: &mut World) -> EventResource {
+    pub fn new<A, B, C>(
+        world: &mut World,
+        event_filter: EntityFilterTuple<A, B, C>,
+    ) -> EventResource
+    where
+        A: for<'a> Filter<ArchetypeFilterData<'a>> + Clone + 'static,
+        B: for<'a> Filter<ChunksetFilterData<'a>> + Clone + 'static,
+        C: for<'a> Filter<ChunkFilterData<'a>> + Clone + 'static,
+    {
         let (tx, rx) = unbounded();
 
-        world.subscribe(tx.clone(), registered());
+        world.subscribe(tx.clone(), event_filter);
 
         EventResource {
             legion_events_tx: tx,
@@ -67,78 +81,5 @@ impl EventResource {
         filter: F,
     ) {
         world.subscribe(self.legion_subscriber().clone(), filter);
-    }
-
-    pub fn gather_events(
-        &self,
-        transport: &mut PostBox<ServerMessage, ClientMessage>,
-        components: &RegisteredComponentsResource,
-        uid_allocator: &mut UidAllocator<Entity>,
-        world: &mut SubWorld,
-    ) {
-        let mut event_handler = LegionEventHandler::new();
-        let events = event_handler.handle(&self.legion_events_rx, world, components);
-
-        for legion_event in events {
-            debug!("{:?}", legion_event);
-
-            match legion_event {
-                LegionEvent::EntityInserted(entity, _component_count) => {
-                    let identifier = uid_allocator.get(&entity);
-
-                    let mut serialized_components: Vec<ComponentData> = Vec::new();
-
-                    for component in components.slice_with_uid().iter() {
-                        // do not sent uid components, as the server will append it's onw.
-                        if component.1.ty() == TypeId::of::<UidComponent>() {
-                            continue;
-                        }
-
-                        if let Some(data) =
-                            component.1.serialize_if_in_subworld(world, entity).unwrap()
-                        {
-                            let record = ComponentData::new(component.0, data);
-                            serialized_components.push(record);
-                        }
-                    }
-
-                    transport.send_immediate(net_sync::ClientMessage::EntityInserted(
-                        identifier,
-                        serialized_components,
-                    ));
-                }
-                LegionEvent::EntityRemoved(entity) => {
-                    let identifier = uid_allocator
-                        .deallocate(entity)
-                        .expect("Entity should be allocated.");
-                    transport.send_immediate(net_sync::ClientMessage::EntityRemoved(identifier));
-                }
-                LegionEvent::ComponentAdded(entity, _component_count) => {
-                    let identifier = uid_allocator.get(&entity);
-
-                    transport.send_immediate(net_sync::ClientMessage::ComponentAdd(
-                        identifier,
-                        ComponentData::new(0, vec![]),
-                    ));
-                }
-                LegionEvent::ComponentRemoved(entity, _component_count) => {
-                    let identifier = uid_allocator.get(&entity);
-                    transport.send_immediate(net_sync::ClientMessage::ComponentRemoved(identifier));
-                }
-            }
-        }
-
-        for modified in self.changed_components() {
-            debug!("Modified {:?}", modified);
-
-            let uid = components
-                .get_uid(&modified.type_id)
-                .expect("Type is not registered. Make sure to apply the `sync` attribute.");
-
-            transport.send(net_sync::ClientMessage::ComponentModified(
-                modified.identifier,
-                ComponentData::new(*uid, modified.modified_fields),
-            ));
-        }
     }
 }

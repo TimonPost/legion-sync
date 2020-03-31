@@ -12,9 +12,10 @@ pub struct TcpClientResource {
 
 impl TcpClientResource {
     pub fn new(addr: SocketAddr) -> Result<TcpClientResource, ErrorKind> {
-        Ok(TcpClientResource {
-            stream: TcpStream::connect(addr)?,
-        })
+        let stream = TcpStream::connect(addr)?;
+        stream.set_nonblocking(true);
+
+        Ok(TcpClientResource { stream })
     }
 
     pub fn sent(&mut self, data: &[u8]) -> Result<usize, ErrorKind> {

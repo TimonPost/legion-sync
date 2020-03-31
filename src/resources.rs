@@ -2,12 +2,13 @@
 
 pub use self::{
     buffer::{BufferResource, PostBoxResource, PostOfficeResource},
-    component::RegisteredComponentsResource,
+    component::{HashmapRegistry, RegisteredComponentsResource},
     event::EventResource,
     packer::Packer,
     tick::TickResource,
     track::TrackResource,
 };
+use crate::universe::network::WorldMappingResource;
 use crate::{
     resources::tcp::{TcpClientResource, TcpListenerResource},
     tracking::SerializationStrategy,
@@ -65,7 +66,6 @@ impl ResourcesExt for Resources {
         serialization: S,
         compression: C,
     ) {
-        self.insert(TrackResource::new());
         self.insert(RemovedEntities::new());
         self.insert(PostOfficeResource::new());
         self.insert_required(serialization, compression);
@@ -87,10 +87,12 @@ impl ResourcesExt for Resources {
         __serialization: S,
         __compression: C,
     ) {
-        self.insert(BufferResource::from_capacity(1500));
+        self.insert(BufferResource::from_capacity(5000));
         self.insert(RegisteredComponentsResource::new());
         self.insert(Packer::<S, C>::default());
         self.insert(UidAllocator::<Entity>::new());
+        self.insert(WorldMappingResource::default());
+        self.insert(TrackResource::new());
     }
 
     fn insert_tcp_client_resources(&mut self, addr: SocketAddr) {

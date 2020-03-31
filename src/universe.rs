@@ -16,13 +16,9 @@ pub trait UniverseBuilder {
 
     fn with_resource<R: Resource>(self, resource: R) -> Self;
 
-    fn main_builder<F>(self, builder: F) -> Self
-    where
-        F: Fn(Builder) -> Builder;
+    fn register_remote_systems(self, user_system_builder: fn(Builder) -> Builder) -> Self;
 
-    fn remote_builder<F>(self, builder: F) -> Self
-    where
-        F: Fn(Builder) -> Builder;
+    fn register_main_systems(self, user_system_builder: fn(Builder) -> Builder) -> Self;
 
     fn build(self) -> Self::BuildResult;
 }

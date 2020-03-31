@@ -24,8 +24,6 @@ impl BufferResource {
     }
 }
 
-/// Resource serving as the owner of the queue of messages to be sent. This resource also serves
-/// as the interface for other systems to send messages.
 pub struct PostOfficeResource {
     postoffice: PostOffice,
     frame_budget_bytes: i32,

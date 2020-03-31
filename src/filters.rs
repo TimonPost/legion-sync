@@ -64,6 +64,7 @@ pub mod filter_fns {
         )
     }
 }
+
 #[derive(Clone)]
 pub struct AllFilter;
 #[derive(Clone)]
@@ -72,11 +73,11 @@ pub struct RemovedFilter;
 pub struct ModifiedFilter;
 
 pub trait TrackResourceFilter: Send + Sync + Clone {
-    fn filter(&self, resource: &TrackResource, identifier: usize) -> bool;
+    fn remove_when_contains(&self, resource: &TrackResource, identifier: usize) -> bool;
 }
 
 impl TrackResourceFilter for AllFilter {
-    fn filter(&self, resource: &TrackResource, identifier: usize) -> bool {
+    fn remove_when_contains(&self, resource: &TrackResource, identifier: usize) -> bool {
         resource.removed.contains(identifier)
             || resource.inserted.contains(identifier)
             || resource.modified.contains(identifier)
@@ -84,13 +85,13 @@ impl TrackResourceFilter for AllFilter {
 }
 
 impl TrackResourceFilter for RemovedFilter {
-    fn filter(&self, resource: &TrackResource, identifier: usize) -> bool {
+    fn remove_when_contains(&self, resource: &TrackResource, identifier: usize) -> bool {
         resource.removed.contains(identifier)
     }
 }
 
 impl TrackResourceFilter for ModifiedFilter {
-    fn filter(&self, resource: &TrackResource, identifier: usize) -> bool {
+    fn remove_when_contains(&self, resource: &TrackResource, identifier: usize) -> bool {
         resource.modified.contains(identifier)
     }
 }
@@ -132,7 +133,10 @@ impl<'a, F: TrackResourceFilter> Filter<ChunkFilterData<'a>> for TrackFilter<'_,
 
         unsafe {
             let raw = &components.data_slice::<UidComponent>()[0];
-            Some(self.filter.filter(&self.cash, raw.uid() as usize))
+            Some(
+                self.filter
+                    .remove_when_contains(&self.cash, raw.uid() as usize),
+            )
         }
     }
 }
@@ -249,7 +253,7 @@ pub mod test {
         resource.remove(1);
         resource.modify(1);
 
-        assert_eq!(AllFilter.filter(&resource, 1), true);
+        assert_eq!(AllFilter.remove_when_contains(&resource, 1), true);
     }
 
     #[test]
@@ -257,7 +261,7 @@ pub mod test {
         let mut resource = TrackResource::new();
         resource.modify(1);
 
-        assert_eq!(ModifiedFilter.filter(&resource, 1), true);
+        assert_eq!(ModifiedFilter.remove_when_contains(&resource, 1), true);
     }
 
     #[test]
@@ -265,25 +269,25 @@ pub mod test {
         let mut resource = TrackResource::new();
         resource.remove(1);
 
-        assert_eq!(RemovedFilter.filter(&resource, 1), true);
+        assert_eq!(RemovedFilter.remove_when_contains(&resource, 1), true);
     }
 
     #[test]
     fn all_filter_should_fail_test() {
         let resource = TrackResource::new();
-        assert_eq!(AllFilter.filter(&resource, 1), false);
+        assert_eq!(AllFilter.remove_when_contains(&resource, 1), false);
     }
 
     #[test]
     fn modified_filter_should_fail_test() {
         let resource = TrackResource::new();
-        assert_eq!(ModifiedFilter.filter(&resource, 1), false);
+        assert_eq!(ModifiedFilter.remove_when_contains(&resource, 1), false);
     }
 
     #[test]
     fn removed_filter_should_fail_test() {
         let resource = TrackResource::new();
-        assert_eq!(RemovedFilter.filter(&resource, 1), false);
+        assert_eq!(RemovedFilter.remove_when_contains(&resource, 1), false);
     }
 
     #[test]

@@ -26,7 +26,7 @@ use std::{
     collections::HashMap,
     sync::Arc,
 };
-use track::{error::ErrorKind, serialization::SerializationStrategy, ModificationEvent};
+use track::{error::ErrorKind, serialization::SerializationStrategy, Apply, ModificationEvent};
 inventory::collect!(ComponentRegistration);
 
 pub type ComponentRegistrationRef = &'static ComponentRegistration;
@@ -37,8 +37,15 @@ pub struct ComponentRegistration {
     pub(crate) component_type_id: ComponentTypeId,
     pub(crate) meta: ComponentMeta,
     pub(crate) type_name: &'static str,
+
     pub(crate) components_clone: fn(*const u8, *mut u8, usize),
-    pub(crate) serialize_if_different: Arc<
+    // The following functions are duplicated, I prefer static duplication.
+    // Alternative can be to abstract 'World' behind an trait. Though `get_component` requires an generic parameters.
+    // Which makes the abstraction a non-trait object wherefore we can't pass into an function pointer.
+    pub(crate) exists_in_world: fn(world: &World, entity: Entity) -> bool,
+    pub(crate) exists_in_subworld: fn(world: &SubWorld, entity: Entity) -> bool,
+
+    pub(crate) serialize_if_changed: Arc<
         dyn Fn(
                 &legion::world::World,
                 legion::entity::Entity,
@@ -48,21 +55,24 @@ pub struct ComponentRegistration {
             ) + Send
             + Sync,
     >,
-    // the following functions are duplicated, alternative would be to put them in a Arc Fn.
-    pub(crate) exists_in_world: fn(world: &World, entity: Entity) -> bool,
-    pub(crate) exists_in_subworld: fn(world: &SubWorld, entity: Entity) -> bool,
-    pub(crate) serialize_if_in_world: Arc<
+
+    pub(crate) serialize_if_exists_in_world: Arc<
         dyn Fn(&World, legion::entity::Entity) -> Result<Option<Vec<u8>>, ErrorKind> + Send + Sync,
     >,
-    pub(crate) serialize_if_in_subworld: Arc<
+    pub(crate) serialize_if_exists_in_subworld: Arc<
         dyn Fn(&SubWorld, legion::entity::Entity) -> Result<Option<Vec<u8>>, ErrorKind>
             + Send
             + Sync,
     >,
-    pub(crate) deserialize_single_fn:
+    pub(crate) deserialize:
         Arc<dyn Fn(&CommandBuffer, legion::entity::Entity, &[u8]) + Send + Sync>,
-    pub(crate) add_write_to_system: fn(SystemBuilder) -> SystemBuilder,
-    pub(crate) add_read_to_system: fn(SystemBuilder) -> SystemBuilder,
+
+    pub(crate) grand_write_access: fn(SystemBuilder) -> SystemBuilder,
+    pub(crate) grand_read_access: fn(SystemBuilder) -> SystemBuilder,
+
+    pub(crate) add_component: Arc<dyn Fn(&mut World, Entity, &[u8]) + Send + Sync>,
+    pub(crate) remove_component: fn(&mut World, Entity),
+    pub(crate) apply_changes: Arc<dyn Fn(&mut World, Entity, &[u8]) + Send + Sync>,
 }
 
 impl Debug for ComponentRegistration {
@@ -88,16 +98,16 @@ impl ComponentRegistration {
         self.type_name
     }
 
-    pub fn deserialize_single(
+    pub fn deserialize(
         &self,
         command_buffer: &CommandBuffer,
         entity: legion::entity::Entity,
         data: &[u8],
     ) {
-        (&*self.deserialize_single_fn)(command_buffer, entity, data)
+        (&*self.deserialize)(command_buffer, entity, data)
     }
 
-    pub fn serialize_if_different(
+    pub fn serialize_if_changed(
         &self,
         src_world: &legion::world::World,
         src_entity: legion::entity::Entity,
@@ -105,7 +115,7 @@ impl ComponentRegistration {
         dst_entity: legion::entity::Entity,
         notifier: &crate::tracking::Sender<ModificationEvent<ComponentId>>,
     ) {
-        (&*self.serialize_if_different)(src_world, src_entity, dst_world, dst_entity, notifier)
+        (&*self.serialize_if_changed)(src_world, src_entity, dst_world, dst_entity, notifier)
     }
 
     pub fn exists_in_subworld(&self, world: &SubWorld, entity: legion::entity::Entity) -> bool {
@@ -116,32 +126,40 @@ impl ComponentRegistration {
         (&self.exists_in_world)(world, entity)
     }
 
-    pub fn serialize_if_in_world(
+    pub fn serialize_if_exists_in_world(
         &self,
         world: &World,
         entity: legion::entity::Entity,
     ) -> Result<Option<Vec<u8>>, ErrorKind> {
-        (&*self.serialize_if_in_world)(world, entity)
+        (&*self.serialize_if_exists_in_world)(world, entity)
     }
 
-    pub fn serialize_if_in_subworld(
+    pub fn serialize_if_exists_in_subworld(
         &self,
         world: &SubWorld,
         entity: legion::entity::Entity,
     ) -> Result<Option<Vec<u8>>, ErrorKind> {
-        (&*self.serialize_if_in_subworld)(world, entity)
+        (&*self.serialize_if_exists_in_subworld)(world, entity)
     }
 
-    pub fn compare(&self, component_type: ComponentTypeId) -> bool {
-        self.type_id() == component_type.0
+    pub fn grand_read_access(&self, system_builder: SystemBuilder) -> SystemBuilder {
+        (self.grand_read_access)(system_builder)
     }
 
-    pub fn add_read_to_system(&self, system_builder: SystemBuilder) -> SystemBuilder {
-        (self.add_read_to_system)(system_builder)
+    pub fn grand_write_access(&self, system_builder: SystemBuilder) -> SystemBuilder {
+        (self.grand_write_access)(system_builder)
     }
 
-    pub fn add_write_to_system(&self, system_builder: SystemBuilder) -> SystemBuilder {
-        (self.add_write_to_system)(system_builder)
+    pub fn add_component(&self, world: &mut World, entity: Entity, component_raw: &[u8]) {
+        (&*self.add_component)(world, entity, component_raw)
+    }
+
+    pub fn remove_component(&self, world: &mut World, entity: Entity) {
+        (self.remove_component)(world, entity)
+    }
+
+    pub fn apply_changes(&self, world: &mut World, entity: Entity, data: &[u8]) {
+        (&*self.apply_changes)(world, entity, data)
     }
 
     pub unsafe fn clone_components(&self, src: *const u8, dst: *mut u8, num_components: usize) {
@@ -175,7 +193,9 @@ impl ComponentRegistration {
         let serialize1 = serialisation.clone();
         let serialize2 = serialisation.clone();
         let serialize3 = serialisation.clone();
-        let deserialize = serialisation.clone();
+        let serialize4 = serialisation.clone();
+        let deserialize1 = serialisation.clone();
+        let deserialize2 = serialisation.clone();
 
         Self {
             component_type_id: ComponentTypeId::of::<T>(),
@@ -189,7 +209,7 @@ impl ComponentRegistration {
                     std::ptr::write(dst_ptr, <T as Clone>::clone(&*src_ptr));
                 }
             },
-            serialize_if_different: Arc::new(
+            serialize_if_changed: Arc::new(
                 move |src_world, src_entity, dst_world, dst_entity, notifier| {
                     let src_comp = src_world.get_component::<T>(src_entity);
                     let dst_comp = dst_world.get_component::<T>(dst_entity);
@@ -230,7 +250,7 @@ impl ComponentRegistration {
                 // Maybe we should open A PR for allowing this via the system world as well.
                 world.get_component::<T>(entity).is_some()
             },
-            serialize_if_in_world: Arc::new(
+            serialize_if_exists_in_world: Arc::new(
                 move |world, entity| -> Result<Option<Vec<u8>>, ErrorKind> {
                     if let Some(component) = world.get_component::<T>(entity) {
                         return Ok(Some(serialize1.serialize(&*component)?));
@@ -238,7 +258,7 @@ impl ComponentRegistration {
                     Ok(None)
                 },
             ),
-            serialize_if_in_subworld: Arc::new(
+            serialize_if_exists_in_subworld: Arc::new(
                 move |world, entity| -> Result<Option<Vec<u8>>, ErrorKind> {
                     if let Some(component) = world.get_component::<T>(entity) {
                         return Ok(Some(serialize2.serialize(&*component)?));
@@ -246,16 +266,32 @@ impl ComponentRegistration {
                     Ok(None)
                 },
             ),
-            deserialize_single_fn: Arc::new(move |command_buffer, entity, data| {
+            deserialize: Arc::new(move |command_buffer, entity, data| {
                 // TODO propagate error
-                let comp = deserialize
+                let comp = deserialize1
                     .deserialize::<T>(data)
                     .expect("failed to deserialize component");
 
                 command_buffer.add_component(entity, comp);
             }),
-            add_read_to_system: |system_builder| system_builder.read_component::<T>(),
-            add_write_to_system: |system_builder| system_builder.write_component::<T>(),
+            grand_read_access: |system_builder| system_builder.read_component::<T>(),
+            grand_write_access: |system_builder| system_builder.write_component::<T>(),
+            add_component: Arc::new(move |world, entity, data| {
+                let component = deserialize2
+                    .deserialize::<T>(data)
+                    .expect("Failed to deserialize component.");
+                world.add_component::<T>(entity, component);
+            }),
+            remove_component: |world, entity| {
+                world.remove_component::<T>(entity);
+            },
+            apply_changes: Arc::new(move |world, entity, data| {
+                let mut component = world
+                    .get_component_mut::<T>(entity)
+                    .expect("Component should exist.");
+                Apply::apply_to(&mut *component, data, serialize4.clone())
+                    .expect("Applying value went wrong.");
+            }),
         }
     }
 }

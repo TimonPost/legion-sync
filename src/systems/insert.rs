@@ -31,10 +31,7 @@ pub fn insert_received_entities_system() -> Box<dyn Schedulable> {
                     if let ClientMessage::EntityInserted(client_id, records) = event {
                         let entity = command_buffer.start_entity().build();
 
-                        let server_id = allocator.allocate(entity, None);
-                        client.add_id_mapping(*client_id, server_id);
-                        track.remove(*client_id as usize);
-                        track.insert(server_id as usize);
+                        let server_id = allocator.allocate(entity, Some(*client_id));
 
                         command_buffer.add_component(entity, UidComponent::new(server_id));
 
@@ -44,14 +41,12 @@ pub fn insert_received_entities_system() -> Box<dyn Schedulable> {
                                 .get(&component.component_id())
                                 .unwrap();
 
-                            registered_component.deserialize_single(
+                            registered_component.deserialize(
                                 command_buffer,
                                 entity.clone(),
                                 component.data(),
                             );
                         }
-
-                        // TODO: sent ack to client
                     }
                 }
             }

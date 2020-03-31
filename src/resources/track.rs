@@ -5,6 +5,8 @@ pub struct TrackResource {
     pub(crate) inserted: BitSet<u32>,
     pub(crate) modified: BitSet<u32>,
     pub(crate) removed: BitSet<u32>,
+    pub(crate) component_added: BitSet<u32>,
+    pub(crate) component_removed: BitSet<u32>,
 }
 
 impl TrackResource {
@@ -13,6 +15,8 @@ impl TrackResource {
             inserted: BitSet::new(),
             modified: BitSet::new(),
             removed: BitSet::new(),
+            component_removed: BitSet::new(),
+            component_added: BitSet::new(),
         }
     }
 
@@ -35,10 +39,44 @@ impl TrackResource {
         self.modified.insert(set);
     }
 
+    pub fn component_add(&mut self, set: usize) {
+        self.component_added.insert(set);
+    }
+
+    pub fn component_unset(&mut self, set: usize) {
+        self.component_removed.insert(set);
+    }
+
     pub fn clear(&mut self) {
         self.inserted.clear();
         self.modified.clear();
         self.removed.clear();
+    }
+
+    pub(crate) fn remove_if_any_contains(&mut self, identifier: usize) -> bool {
+        if self.removed.contains(identifier) {
+            self.removed.remove(identifier);
+            return true;
+        }
+        if self.modified.contains(identifier) {
+            self.modified.remove(identifier);
+            return true;
+        }
+        if self.inserted.contains(identifier) {
+            self.inserted.remove(identifier);
+            return true;
+        }
+
+        if self.component_added.contains(identifier) {
+            self.component_added.remove(identifier);
+            return true;
+        }
+        if self.component_removed.contains(identifier) {
+            self.component_removed.remove(identifier);
+            return false;
+        }
+
+        return false;
     }
 }
 
@@ -48,6 +86,8 @@ impl Clone for TrackResource {
             inserted: self.inserted.clone(),
             removed: self.removed.clone(),
             modified: self.removed.clone(),
+            component_added: self.component_added.clone(),
+            component_removed: self.component_removed.clone(),
         }
     }
 }

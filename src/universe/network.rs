@@ -28,10 +28,34 @@ impl WorldInstance {
     }
 }
 
+pub struct WorldMappingResource {
+    pub(crate) replace_mappings: HashMap<Entity, Entity>,
+}
+
+impl WorldMappingResource {
+    pub fn remote_representative(&self, entity: Entity) -> Option<Entity> {
+        self.replace_mappings
+            .iter()
+            .find(|(remote, main)| **main == entity)
+            .map(|val| *val.0)
+    }
+
+    pub fn refresh_mappings(&mut self, result_mappings: HashMap<Entity, Entity>) {
+        self.replace_mappings
+            .extend(result_mappings.iter().map(|(k, v)| (k.clone(), v.clone())));
+    }
+}
+
+impl Default for WorldMappingResource {
+    fn default() -> Self {
+        WorldMappingResource {
+            replace_mappings: HashMap::new(),
+        }
+    }
+}
+
 pub struct NetworkUniverse {
     pub(crate) universe: Universe,
-    pub(crate) replace_mappings: HashMap<Entity, Entity>,
-    pub(crate) result_mappings: HashMap<Entity, Entity>,
     pub(crate) main: WorldInstance,
     pub(crate) remote: WorldInstance,
 }
@@ -40,128 +64,13 @@ impl NetworkUniverse {
     pub fn new(universe: Universe, main: WorldInstance, remote: WorldInstance) -> NetworkUniverse {
         NetworkUniverse {
             universe,
-            replace_mappings: HashMap::new(),
-            result_mappings: HashMap::new(),
             main,
             remote,
         }
     }
 
-    pub fn merge_into(&mut self, resources: &Resources, world_state: &mut WorldState) {
-        // Setup resources
-        let mut allocator = resources.get_mut::<UidAllocator<Entity>>().unwrap();
-        let mut removed_entities = resources.get_mut::<RemovedEntities>().unwrap();
-        let components = resources.get::<RegisteredComponentsResource>().unwrap();
-        let event_resource = resources.get_mut::<EventResource>().unwrap();
+    pub fn merge_into(&mut self, resources: &mut WorldMappingResource) {
 
-        // Handle remove events, and clear mappings to prevent merge of removed entities and delete entity from worlds.
-        for to_remove in removed_entities.drain() {
-            let removed = self
-                .replace_mappings
-                .remove(&to_remove)
-                .expect("Tried to remove entity while it didn't exist.");
-
-            self.result_mappings
-                .remove(&to_remove)
-                .expect("Tried to remove entity while it didn't exist.");
-
-            self.main.world.delete(removed);
-
-            let identifier = allocator
-                .deallocate(to_remove)
-                .expect("Entity should be allocated.");
-
-            world_state.remove_entity(identifier);
-        }
-
-        {
-            // All (syncable) entities are mapped, retrieve the entity id and get its registration instance.
-            // Then compare and serialize the changes from the the remote and main world component.
-            let slice = components.slice_with_uid();
-            for (remote, main) in self.replace_mappings.iter() {
-                for (_id, comp) in slice.iter() {
-                    comp.serialize_if_different(
-                        &self.main.world,
-                        *main,
-                        &self.remote.world,
-                        *remote,
-                        event_resource.notifier(),
-                    );
-                }
-            }
-        }
-
-        let clone_impl = crate::create_copy_clone_impl();
-
-        // Clone remote world into main world.
-        self.main.world.clone_from(
-            &self.remote.world,
-            &clone_impl,
-            &mut HashMapCloneImplResult(&mut self.result_mappings),
-            &HashMapEntityReplacePolicy(&self.replace_mappings),
-        );
-
-        self.replace_mappings.extend(
-            self.result_mappings
-                .iter()
-                .map(|(k, v)| (k.clone(), v.clone())),
-        );
-
-        // Handle the events from above merge operation.
-        let mut event_handler = LegionEventHandler::new();
-
-        let events = event_handler.handle(
-            &event_resource.legion_receiver(),
-            &self.main.world,
-            &components,
-        );
-
-        for legion_event in events {
-            debug!("{:?}", legion_event);
-            match legion_event {
-                LegionEvent::EntityInserted(entity, _component_count) => {
-                    let entity = self
-                        .replace_mappings
-                        .iter()
-                        .find(|(_k, v)| **v == entity)
-                        .expect("Entity should be in replace mappings.");
-
-                    let identifier = allocator.get(&entity.0);
-
-                    let mut serialized_components: Vec<ComponentData> = Vec::new();
-
-                    for component in components.slice_with_uid().iter() {
-                        if let Some(data) = component
-                            .1
-                            .serialize_if_in_world(&self.main.world, *entity.1)
-                            .unwrap()
-                        {
-                            let record = ComponentData::new(component.0, data);
-                            serialized_components.push(record);
-                        }
-                    }
-
-                    world_state.insert_entity(identifier, serialized_components);
-                }
-                LegionEvent::ComponentAdded(entity, _component_count) => {
-                    let identifier = allocator.get(&entity);
-                    world_state.add_component(identifier, ComponentData::new(0, vec![]))
-                }
-                LegionEvent::ComponentRemoved(entity, _component_count) => {
-                    let identifier = allocator.get(&entity);
-                    world_state.remove_component(identifier, 0);
-                }
-                _ => {}
-            }
-        }
-
-        for event in event_resource.changed_components() {
-            let register_id = components.get_uid(&event.type_id).expect("Should exist");
-            world_state.change(
-                event.identifier,
-                ComponentData::new(*register_id, event.modified_fields),
-            );
-        }
     }
 
     pub fn create_world(&self) -> World {
@@ -202,6 +111,8 @@ impl DerefMut for NetworkUniverse {
 #[cfg(test)]
 pub mod test {
     pub use crate as legion_sync;
+    use crate::filters::filter_fns::registered;
+    use crate::universe::network::WorldMappingResource;
     use crate::{
         components::UidComponent,
         resources::{EventResource, RegisteredComponentsResource, RemovedEntities},
@@ -245,7 +156,7 @@ pub mod test {
         resources.insert(RemovedEntities::new());
         resources.insert(UidAllocator::<Entity>::new());
         resources.insert(RegisteredComponentsResource::new());
-        resources.insert(EventResource::new(universe.main_world_mut()));
+        resources.insert(EventResource::new(universe.main_world_mut(), registered()));
 
         // insert into remote world
         let entities = universe
@@ -260,6 +171,9 @@ pub mod test {
             )
             .to_vec();
 
+        let mut event_resource = resources.get_mut::<EventResource>().unwrap();
+        let rx = event_resource.legion_receiver();
+
         {
             let mut allocator = resources.get_mut::<UidAllocator<Entity>>().unwrap();
             allocator.allocate(entities[0], Some(1));
@@ -272,9 +186,15 @@ pub mod test {
             panic!("should not contain entities.")
         }
 
+        let mut world_mapping = WorldMappingResource::default();
+
         let mut world_state = WorldState::new();
 
-        universe.merge_into(&resources, &mut world_state);
+        universe.merge_into(&mut world_mapping);
+
+        while let Ok(event) = rx.try_recv() {
+            println!("merge 1 {:?}", event);
+        }
 
         {
             let mut pos = universe
@@ -283,15 +203,19 @@ pub mod test {
                 .unwrap();
             pos.x = 22;
         }
+        //
+        //        {
+        //            universe.remote_world_mut().delete(entities[1]);
+        //            let mut removed = resources.get_mut::<RemovedEntities>().unwrap();
+        //            removed.add(entities[1]);
+        //        }
 
         {
-            universe.remote_world_mut().delete(entities[1]);
-            let mut removed = resources.get_mut::<RemovedEntities>().unwrap();
-            removed.add(entities[1]);
+            universe.merge_into(&mut world_mapping);
         }
 
-        {
-            universe.merge_into(&resources, &mut world_state);
+        while let Ok(event) = rx.try_recv() {
+            println!("merge 2 {:?}", event);
         }
 
         println!("state: {:?}", world_state);

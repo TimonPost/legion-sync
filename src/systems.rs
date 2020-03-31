@@ -5,19 +5,23 @@ use legion::systems::schedule::Builder;
 use crate::{systems::tcp::tcp_client_sent_system, tracking::SerializationStrategy};
 use net_sync::compression::CompressionStrategy;
 
+mod authoritative;
 mod insert;
 pub mod tcp;
 mod track;
 
-pub use self::{insert::insert_received_entities_system, track::track_modifications_system};
+pub use self::{
+    authoritative::{authoritative_system, AuthoritativeResource},
+    insert::insert_received_entities_system,
+    track::track_modifications_system,
+};
 use crate::{resources::RegisteredComponentsResource, systems::tcp::tcp_client_receive_system};
 use legion::prelude::SystemBuilder;
 
 pub trait SchedulerExt {
     fn add_server_systems(self) -> Builder;
     fn add_client_systems(self) -> Builder;
-    fn add_required_systems(self) -> Builder;
-    fn add_tcp_listener_systems<
+    fn add_tcp_server_systems<
         S: SerializationStrategy + 'static,
         C: CompressionStrategy + 'static,
     >(
@@ -33,19 +37,15 @@ pub trait SchedulerExt {
 
 impl SchedulerExt for Builder {
     fn add_server_systems(self) -> Builder {
-        self.add_system(insert_received_entities_system())
+        self.add_system(authoritative_system())
+            .add_system(insert_received_entities_system())
     }
 
     fn add_client_systems(self) -> Builder {
         self.add_system(track_modifications_system())
     }
 
-    fn add_required_systems(self) -> Builder {
-        // TODO: future use
-        self
-    }
-
-    fn add_tcp_listener_systems<
+    fn add_tcp_server_systems<
         S: SerializationStrategy + 'static,
         C: CompressionStrategy + 'static,
     >(
@@ -53,6 +53,7 @@ impl SchedulerExt for Builder {
     ) -> Builder {
         self.add_system(tcp::tcp_connection_listener())
             .add_system(tcp::tcp_server_receive_system::<S, C>())
+            .add_system(tcp::tcp_server_sent_system::<S, C>())
     }
 
     fn add_tcp_client_systems<
@@ -75,7 +76,7 @@ impl SystemBuilderExt for SystemBuilder {
     fn read_registered_components(self) -> SystemBuilder {
         let mut builder = self;
         for component in RegisteredComponentsResource::new().slice_with_uid().iter() {
-            builder = component.1.add_read_to_system(builder);
+            builder = component.1.grand_read_access(builder);
         }
         builder
     }
@@ -83,7 +84,7 @@ impl SystemBuilderExt for SystemBuilder {
     fn write_registered_components(self) -> SystemBuilder {
         let mut builder = self;
         for component in RegisteredComponentsResource::new().slice_with_uid().iter() {
-            builder = component.1.add_write_to_system(builder);
+            builder = component.1.grand_write_access(builder);
         }
         builder
     }
