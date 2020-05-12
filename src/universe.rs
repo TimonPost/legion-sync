@@ -1,6 +1,9 @@
-use crate::tracking::SerializationStrategy;
 use legion::systems::{resource::Resource, schedule::Builder};
+
 use net_sync::compression::CompressionStrategy;
+
+use crate::tracking::SerializationStrategy;
+
 pub mod client;
 pub mod network;
 pub mod server;
@@ -16,9 +19,7 @@ pub trait UniverseBuilder {
 
     fn with_resource<R: Resource>(self, resource: R) -> Self;
 
-    fn register_remote_systems(self, user_system_builder: fn(Builder) -> Builder) -> Self;
-
-    fn register_main_systems(self, user_system_builder: fn(Builder) -> Builder) -> Self;
+    fn register_systems(self, user_system_builder: fn(Builder) -> Builder) -> Self;
 
     fn build(self) -> Self::BuildResult;
 }

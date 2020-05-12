@@ -1,28 +1,10 @@
-use legion::{prelude::Event, systems::SubWorld};
-
-use crate::filters::TrackResourceFilter;
-use crate::resources::TrackResource;
-use crate::universe::network::WorldMappingResource;
-use crate::{
-    components::UidComponent,
-    event::{LegionEvent, LegionEventHandler},
-    filters::filter_fns::registered,
-    resources::RegisteredComponentsResource,
-};
 use legion::filter::{
     ArchetypeFilterData, ChunkFilterData, ChunksetFilterData, EntityFilterTuple, Filter,
 };
-use legion::{
-    filter::EntityFilter,
-    prelude::{Entity, World},
-};
-use log::debug;
-use net_sync::{
-    transport::PostBox,
-    uid::{Uid, UidAllocator},
-    ClientMessage, ComponentData, ServerMessage,
-};
-use std::any::{Any, TypeId};
+use legion::prelude::Event;
+use legion::{filter::EntityFilter, prelude::World};
+
+use net_sync::uid::Uid;
 use track::{
     re_exports::crossbeam_channel::{unbounded, Receiver, Sender, TryIter},
     ModificationChannel, ModificationEvent,

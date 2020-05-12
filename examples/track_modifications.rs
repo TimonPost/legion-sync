@@ -1,6 +1,9 @@
+use std::{thread, time::Duration};
+
 use legion::prelude::{
     any, IntoQuery, Read, Resources, Schedulable, Schedule, SystemBuilder, Universe,
 };
+
 use legion_sync::{
     components::UidComponent,
     resources::{EventResource, PostOfficeResource, RegisteredComponentsResource},
@@ -8,7 +11,6 @@ use legion_sync::{
     tracking::*,
 };
 use net_sync::uid::Uid;
-use std::{thread, time::Duration};
 
 #[sync]
 #[derive(Debug)]

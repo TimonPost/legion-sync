@@ -1,77 +1,86 @@
-use crate::event::{LegionEvent, LegionEventHandler};
-use crate::filters::filter_fns::registered;
-use crate::resources::{PostOfficeResource, RegisteredComponentsResource, RemovedEntities};
-use crate::tracking::Bincode;
-use crate::universe::network::WorldMappingResource;
-use crate::{
-    resources::{EventResource, ResourcesExt, TickResource},
-    systems::SchedulerExt,
-    tracking::SerializationStrategy,
-    universe::{
-        network::{NetworkUniverse, WorldInstance},
-        UniverseBuilder,
-    },
-};
-use legion::prelude::{Entity, SystemBuilder, World};
+use std::net::TcpListener;
+
+use legion::prelude::{Entity, World, any};
 use legion::{
     prelude::{Resources, Universe},
     systems::{resource::Resource, schedule::Builder},
 };
 use log::debug;
+
 use net_sync::compression::lz4::Lz4;
-use net_sync::transport::PostOffice;
+use net_sync::synchronisation::CommandFrameTicker;
+use net_sync::transport::{PostOffice, NetworkCommand, NetworkMessage};
 use net_sync::uid::UidAllocator;
-use net_sync::{compression::CompressionStrategy, state::WorldState, ComponentData, ServerMessage};
-use std::net::{SocketAddr, TcpListener};
-use std::collections::HashMap;
-use legion::world::{HashMapEntityReplacePolicy, HashMapCloneImplResult};
+use net_sync::{compression::CompressionStrategy, state::WorldState, ComponentData, transport};
+
+use crate::event::{LegionEvent, LegionEventHandler};
+use crate::filters::filter_fns::registered;
+use crate::resources::RegisteredComponentsResource;
+use crate::tracking::Bincode;
+use crate::{
+    resources::{EventResource, ResourcesExt},
+    systems::BuilderExt,
+    tracking::SerializationStrategy,
+    universe::{
+        network::{WorldInstance},
+        UniverseBuilder,
+    },
+};
+use serde::export::PhantomData;
 
 pub struct ServerConfig {
-    /// The tick rate in milliseconds.
-    pub tick_rate: u8,
 }
 
 impl Default for ServerConfig {
     fn default() -> Self {
-        ServerConfig { tick_rate: 10 }
+        ServerConfig { }
     }
 }
 
-pub struct ServerUniverseBuilder {
+pub struct ServerUniverseBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+{
     resources: Resources,
-    remote_builder: Builder,
-    main_builder: Builder,
+    system_builder: Builder,
     config: ServerConfig,
+
+    stcm: PhantomData<ServerToClientMessage>,
+    ctsm: PhantomData<ClientToServerMessage>,
+    ctsc: PhantomData<ClientToServerCommand>
 }
 
-impl Default for ServerUniverseBuilder {
+impl<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage,ClientToServerCommand: NetworkCommand> Default for ServerUniverseBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+{
     fn default() -> Self {
         ServerUniverseBuilder {
             resources: Default::default(),
-            remote_builder: Builder::default(),
-            main_builder: Builder::default(),
+            system_builder: Builder::default(),
             config: ServerConfig::default(),
+
+            stcm: PhantomData,
+            ctsm: PhantomData,
+            ctsc: PhantomData
         }
         .default_systems()
         .default_resources::<Bincode, Lz4>()
     }
 }
 
-impl UniverseBuilder for ServerUniverseBuilder {
-    type BuildResult = ServerUniverse;
+impl<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage,ClientToServerCommand: NetworkCommand> UniverseBuilder for ServerUniverseBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+{
+    type BuildResult = ServerUniverse<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>;
 
     fn default_resources<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
         self,
     ) -> Self {
         let mut s = self;
         s.resources
-            .insert_server_resources(S::default(), C::default());
+            .insert_server_resources::<S, C, ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>(S::default(), C::default());
         s
     }
 
     fn default_systems(self) -> Self {
         let mut s = self;
-        s.remote_builder = s.remote_builder.add_server_systems();
+        s.system_builder = s.system_builder.add_server_systems();
         s
     }
 
@@ -81,15 +90,9 @@ impl UniverseBuilder for ServerUniverseBuilder {
         s
     }
 
-    fn register_main_systems(self, user_system_builder: fn(Builder) -> Builder) -> Self {
+    fn register_systems(self, user_system_builder: fn(Builder) -> Builder) -> Self {
         let mut s = self;
-        s.main_builder = user_system_builder(s.main_builder);
-        s
-    }
-
-    fn register_remote_systems(self, user_system_builder: fn(Builder) -> Builder) -> Self {
-        let mut s = self;
-        s.remote_builder = user_system_builder(s.remote_builder);
+        s.system_builder = user_system_builder(s.system_builder);
         s
     }
 
@@ -98,29 +101,28 @@ impl UniverseBuilder for ServerUniverseBuilder {
 
         let universe = Universe::new();
         let mut main_world = universe.create_world();
-        let remote_world = universe.create_world();
 
         s.resources
-            .insert(EventResource::new(&mut main_world, registered()));
+            .insert(EventResource::new(&mut main_world, any()));
 
-        let main_world = WorldInstance::new(main_world, s.main_builder.build());
-        let remote_world = WorldInstance::new(remote_world, s.remote_builder.build());
+        let world = WorldInstance::new(main_world, s.system_builder.build());
 
         ServerUniverse::new(
             s.resources,
-            NetworkUniverse::new(universe, main_world, remote_world),
+            world,
         )
     }
 }
 
-impl ServerUniverseBuilder {
+impl<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage,ClientToServerCommand: NetworkCommand> ServerUniverseBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+{
     pub fn with_tcp<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
         mut self,
         listener: TcpListener,
     ) -> Self {
-        listener.set_nonblocking(true);
+        listener.set_nonblocking(true).expect("Cannot set non-blocking on TCP socket.");
         self.resources.insert_tcp_listener_resources(listener);
-        self.remote_builder = self.remote_builder.add_tcp_server_systems::<S, C>();
+        self.system_builder = self.system_builder.add_tcp_server_systems::<S, C, ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>();
         self
     }
 
@@ -130,189 +132,117 @@ impl ServerUniverseBuilder {
     }
 }
 
-pub struct ServerUniverse {
+pub struct ServerUniverse<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage,ClientToServerCommand: NetworkCommand>
+{
+    pub(crate) world: WorldInstance,
     config: ServerConfig,
-    universe: NetworkUniverse,
     pub(crate) resources: Resources,
+    pub(crate) state_update_sequence: u16,
+
+    stcm: PhantomData<ServerToClientMessage>,
+    ctsm: PhantomData<ClientToServerMessage>,
+    ctsc: PhantomData<ClientToServerCommand>
 }
 
-impl ServerUniverse {
-    pub fn new(resources: Resources, universe: NetworkUniverse) -> ServerUniverse {
+
+
+impl<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage,ClientToServerCommand: NetworkCommand> ServerUniverse<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+{
+    pub fn new(resources: Resources, world: WorldInstance) -> ServerUniverse<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand> {
         ServerUniverse {
+            world,
             resources,
             config: ServerConfig::default(),
-            universe,
+            state_update_sequence: 0,
+
+            stcm: PhantomData,
+            ctsm: PhantomData,
+            ctsc: PhantomData
         }
     }
 
     pub fn tick(&mut self) {
         let resources = &mut self.resources;
 
-        self.universe.remote.execute(resources);
-        self.universe.main.execute(resources);
+        self.world.execute(resources);
 
-        let server_tick = resources.get_mut::<TickResource>().unwrap().tick();
+        let mut command_ticker = resources.get_mut::<CommandFrameTicker>().unwrap();
 
-        if server_tick % 10 == 0 {
-            let mut world_state = WorldState::new();
+        if command_ticker.try_tick() {
+            let mut world_state = WorldState::new(command_ticker.command_frame());
 
             // Setup resources
             let mut allocator = resources.get_mut::<UidAllocator<Entity>>().unwrap();
-            let mut removed_entities = resources.get_mut::<RemovedEntities>().unwrap();
             let components = resources.get::<RegisteredComponentsResource>().unwrap();
             let event_resource = resources.get_mut::<EventResource>().unwrap();
-            let mut world_mappings = resources.get_mut::<WorldMappingResource>().unwrap();
-
-            // First remove entities.
-            handle_remove_entities(
-                &mut removed_entities,
-                &mut self.universe.main.world,
-                &mut allocator,
-                &mut world_mappings,
-                &mut world_state,
-            );
-
-            // Serialize the entity differences, from the remote and main world.
-            serialize_entity_differences(
-                &mut self.universe,
-                &components,
-                &event_resource,
-                &world_mappings,
-            );
 
             // Add the serializes differences to the world state.
             add_differences_to_state(&event_resource, &components, &mut world_state);
 
-            // Merge the remote world into the main world.
-            let clone_impl = crate::create_copy_clone_impl();
-
-            let mut result_mappings = HashMap::new();
-
-            // Clone remote world into main world.
-            self.universe.main.world.clone_from(
-                &self.universe.remote.world,
-                &clone_impl,
-                &mut HashMapCloneImplResult(&mut result_mappings),
-                &HashMapEntityReplacePolicy(&world_mappings.replace_mappings),
-            );
-
-            // Handle the insert, component add, component remove events caused by the merge operation.
-            handle_events_from_merge(
-                &self.universe.main.world,
-                &mut allocator,
-                &mut world_mappings,
-                &components,
-                &event_resource,
-                &mut world_state,
-                &result_mappings
-            );
-
-            world_mappings.refresh_mappings(result_mappings);
+            handle_world_events(&self.world.world, &mut allocator, &components, &event_resource, &mut world_state);
 
             // Sent state update to all clients.
             if !world_state.is_empty() {
-                let mut postoffice = resources.get_mut::<PostOfficeResource>().unwrap();
-                sent_state_update_to_clients(&mut postoffice, world_state);
+                let mut postoffice = resources.get_mut::<PostOffice<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>>().unwrap();
+                postoffice.broadcast(transport::ServerToClientMessage::StateUpdate(world_state));
             }
         }
+    }
 
-        resources.get_mut::<TickResource>().unwrap().increment();
+    pub fn resources(&self) -> &Resources {
+        &self.resources
+    }
+
+    pub fn resources_mut(&mut self) -> &mut Resources {
+        &mut self.resources
     }
 }
 
 // Handle the events from above merge operation.
-fn handle_events_from_merge(
-    main_world: &World,
+fn handle_world_events(
+    world: &World,
     allocator: &mut UidAllocator<Entity>,
-    world_mappings: &mut WorldMappingResource,
     components: &RegisteredComponentsResource,
     event_resource: &EventResource,
     world_state: &mut WorldState,
-    result_mappings: &HashMap<Entity, Entity>
 ) {
     let mut event_handler = LegionEventHandler::new();
 
-    let events = event_handler.handle(&event_resource.legion_receiver(), main_world, &components);
-
-    for (remote, main) in result_mappings.iter() {
-        let identifier = allocator.get(&remote);
-
-        let mut serialized_components: Vec<ComponentData> = Vec::new();
-
-        for component in components.slice_with_uid().iter() {
-            if let Some(data) = component
-                .1
-                .serialize_if_exists_in_world(main_world, *main)
-                .unwrap()
-            {
-                let record = ComponentData::new(component.0, data);
-                serialized_components.push(record);
-            }
-        }
-
-        world_state.insert_entity(identifier, serialized_components);
-    }
+    let events = event_handler.handle(&event_resource.legion_receiver(), world, &components);
 
     for legion_event in events {
         debug!("{:?}", legion_event);
         match legion_event {
             LegionEvent::ComponentAdded(entity, _component_count) => {
-                let entity = world_mappings.remote_representative(entity).unwrap();
                 let identifier = allocator.get(&entity);
                 world_state.add_component(identifier, ComponentData::new(0, vec![]))
             }
             LegionEvent::ComponentRemoved(entity, _component_count) => {
-                let entity = world_mappings.remote_representative(entity).unwrap();
                 let identifier = allocator.get(&entity);
                 world_state.remove_component(identifier, 0);
             }
-            _ => {}
-        }
-    }
-}
+            LegionEvent::EntityRemoved(entity) => {
+                let identifier = allocator.get(&entity);
+                world_state.remove_entity(identifier);
 
-// Handle remove events, and clear mappings to prevent merge of removed entities and delete entity from worlds.
-fn handle_remove_entities(
-    removed_entities: &mut RemovedEntities,
-    main_world: &mut World,
-    allocator: &mut UidAllocator<Entity>,
-    world_mappings: &mut WorldMappingResource,
-    world_state: &mut WorldState,
-) {
-    for to_remove in removed_entities.drain() {
-        let removed = world_mappings
-            .replace_mappings
-            .remove(&to_remove)
-            .expect("Tried to remove entity while it didn't exist.");
+                // TODO?
+//                let identifier = allocator
+//                    .deallocate(to_remove)
+//                    .expect("Entity should be allocated.");
+            }
+            LegionEvent::EntityInserted(entity, _component_count) => {
+                let identifier = allocator.get(&entity);
 
-        main_world.delete(removed);
+                let mut entity_components = Vec::new();
 
-        let identifier = allocator
-            .deallocate(to_remove)
-            .expect("Entity should be allocated.");
+                for component in components.slice_with_uid().iter() {
+                    if let Some(serialized_component) = component.1.serialize_if_exists_in_world(&world, entity).unwrap() {
+                        entity_components.push(ComponentData::new(component.0, serialized_component));
+                    }
+                }
 
-        world_state.remove_entity(identifier);
-    }
-}
-
-// All (syncable) entities are mapped, retrieve the entity id and get its registration instance.
-// Then compare and serialize the changes from the the remote and main world component.
-fn serialize_entity_differences(
-    universe: &mut NetworkUniverse,
-    components: &RegisteredComponentsResource,
-    event_resource: &EventResource,
-    world_mappings: &WorldMappingResource,
-) {
-    let slice = components.slice_with_uid();
-    for (remote, main) in world_mappings.replace_mappings.iter() {
-        for (_id, comp) in slice.iter() {
-            comp.serialize_if_changed(
-                &universe.main.world,
-                *main,
-                &universe.remote.world,
-                *remote,
-                event_resource.notifier(),
-            );
+                world_state.insert_entity(identifier, entity_components);
+            }
         }
     }
 }
@@ -331,10 +261,3 @@ fn add_differences_to_state(
     }
 }
 
-fn sent_state_update_to_clients(postoffice: &mut PostOfficeResource, world_state: WorldState) {
-    for client in postoffice.clients_mut().iter_mut() {
-        let postbox = client.1.postbox_mut();
-        debug!("Sending State Update");
-        postbox.send(ServerMessage::StateUpdate(world_state.clone()));
-    }
-}

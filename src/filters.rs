@@ -1,21 +1,29 @@
-use crate::{components::UidComponent, resources::TrackResource};
+use std::{collections::HashSet, slice::Iter};
+
 use legion::{
     filter::*,
     iterator::SliceVecIter,
     storage::{ComponentResourceSet, ComponentStorage, ComponentTypeId},
 };
-use std::{collections::HashSet, slice::Iter};
+
+use net_sync::track::TrackResource;
+
+use crate::components::UidComponent;
 
 pub mod filter_fns {
-    use super::{ModifiedFilter, RemovedFilter, TrackFilter};
+    use std::collections::HashSet;
+
+    use legion::filter::{Any, EntityFilterTuple, Passthrough};
+
+    use net_sync::track::TrackResource;
+
     use crate::{
         filters::{AllFilter, RegisteredComponentFilter},
         register::ComponentRegister,
-        resources::TrackResource,
         tracking::ComponentTypeId,
     };
-    use legion::filter::{Any, EntityFilterTuple, Passthrough};
-    use std::collections::HashSet;
+
+    use super::{ModifiedFilter, RemovedFilter, TrackFilter};
 
     pub fn all<'a>(
         cash: &'a TrackResource,
@@ -229,6 +237,14 @@ impl<'a, Rhs: ActiveFilter> std::ops::BitAnd<Rhs> for RegisteredComponentFilter 
 
 #[cfg(test)]
 pub mod test {
+    use std::collections::HashSet;
+
+    use legion::{
+        event::Event,
+        filter::*,
+        prelude::{IntoQuery, Read, Universe, World},
+    };
+
     use crate::{
         components::UidComponent,
         filters::{
@@ -239,12 +255,6 @@ pub mod test {
         resources::TrackResource,
         tracking::ComponentTypeId,
     };
-    use legion::{
-        event::Event,
-        filter::*,
-        prelude::{IntoQuery, Read, Universe, World},
-    };
-    use std::collections::HashSet;
 
     #[test]
     fn all_filter_should_pass_test() {

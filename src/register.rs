@@ -1,7 +1,5 @@
-use crate::{
-    components::UidComponent,
-    tracking::serde_diff::{Config, Diff, FieldPathMode, SerdeDiff},
-};
+use std::{any::TypeId, collections::HashMap, sync::Arc};
+
 use legion::{
     command::CommandBuffer,
     prelude::Entity,
@@ -10,10 +8,6 @@ use legion::{
     world::World,
 };
 use log::error;
-use net_sync::{
-    uid::{Uid, UidAllocator},
-    ComponentId,
-};
 use serde::{
     export::{
         fmt::{Debug, Error},
@@ -21,12 +15,18 @@ use serde::{
     },
     Deserialize, Serialize,
 };
-use std::{
-    any::{Any, TypeId},
-    collections::HashMap,
-    sync::Arc,
+
+use net_sync::{
+    uid::{Uid, UidAllocator},
+    ComponentId,
 };
 use track::{error::ErrorKind, serialization::SerializationStrategy, Apply, ModificationEvent};
+
+use crate::{
+    components::UidComponent,
+    tracking::serde_diff::{Config, Diff, FieldPathMode, SerdeDiff},
+};
+
 inventory::collect!(ComponentRegistration);
 
 pub type ComponentRegistrationRef = &'static ComponentRegistration;
@@ -283,7 +283,7 @@ impl ComponentRegistration {
                 world.add_component::<T>(entity, component);
             }),
             remove_component: |world, entity| {
-                world.remove_component::<T>(entity);
+                world.remove_component::<T>(entity).expect("Can not remove component from world.");
             },
             apply_changes: Arc::new(move |world, entity, data| {
                 let mut component = world
@@ -337,14 +337,16 @@ macro_rules! register_component_type {
 
 #[cfg(test)]
 pub mod test {
+    use std::any::TypeId;
+
+    use legion::storage::{ComponentMeta, ComponentTypeId};
+    use serde::{Deserialize, Serialize};
+
     use crate::{
         components::UidComponent,
         register::{ComponentRegister, ComponentRegistration, ComponentRegistrationRef},
         tracking::{serde_diff, Bincode, SerdeDiff},
     };
-    use legion::storage::{ComponentMeta, ComponentTypeId};
-    use serde::{Deserialize, Serialize};
-    use std::any::TypeId;
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, SerdeDiff)]
     struct Component {}

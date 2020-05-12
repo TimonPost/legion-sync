@@ -1,69 +1,74 @@
 //! A number of systems that can be used to synchronize and trace components.
 
+use legion::prelude::SystemBuilder;
 use legion::systems::schedule::Builder;
 
-use crate::{systems::tcp::tcp_client_sent_system, tracking::SerializationStrategy};
 use net_sync::compression::CompressionStrategy;
 
-mod authoritative;
-mod insert;
-pub mod tcp;
-mod track;
-
-pub use self::{
-    authoritative::{authoritative_system, AuthoritativeResource},
-    insert::insert_received_entities_system,
-    track::track_modifications_system,
-};
 use crate::{resources::RegisteredComponentsResource, systems::tcp::tcp_client_receive_system};
-use legion::prelude::SystemBuilder;
+use crate::{systems::tcp::tcp_client_sent_system, tracking::SerializationStrategy};
+use net_sync::transport::{NetworkCommand, NetworkMessage};
 
-pub trait SchedulerExt {
+pub mod tcp;
+
+pub trait BuilderExt {
     fn add_server_systems(self) -> Builder;
     fn add_client_systems(self) -> Builder;
     fn add_tcp_server_systems<
         S: SerializationStrategy + 'static,
         C: CompressionStrategy + 'static,
+        ServerToClientMessage: NetworkMessage,
+        ClientToServerMessage: NetworkMessage,
+        ClientToServerCommand: NetworkCommand,
     >(
         self,
     ) -> Builder;
     fn add_tcp_client_systems<
         S: SerializationStrategy + 'static,
         C: CompressionStrategy + 'static,
+        ServerToClientMessage: NetworkMessage,
+        ClientToServerMessage: NetworkMessage,
+        ClientToServerCommand: NetworkCommand,
     >(
         self,
     ) -> Builder;
 }
 
-impl SchedulerExt for Builder {
+impl BuilderExt for Builder {
     fn add_server_systems(self) -> Builder {
-        self.add_system(authoritative_system())
-            .add_system(insert_received_entities_system())
+        self
     }
 
     fn add_client_systems(self) -> Builder {
-        self.add_system(track_modifications_system())
+        self
     }
 
     fn add_tcp_server_systems<
         S: SerializationStrategy + 'static,
         C: CompressionStrategy + 'static,
+        ServerToClientMessage: NetworkMessage,
+        ClientToServerMessage: NetworkMessage,
+        ClientToServerCommand: NetworkCommand,
     >(
         self,
     ) -> Builder {
-        self.add_system(tcp::tcp_connection_listener())
-            .add_system(tcp::tcp_server_receive_system::<S, C>())
-            .add_system(tcp::tcp_server_sent_system::<S, C>())
+        self.add_system(tcp::tcp_connection_listener::<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>())
+            .add_system(tcp::tcp_server_receive_system::<S, C, ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>())
+            .add_system(tcp::tcp_server_sent_system::<S, C, ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>())
     }
 
     fn add_tcp_client_systems<
         S: SerializationStrategy + 'static,
         C: CompressionStrategy + 'static,
+        ServerToClientMessage: NetworkMessage,
+        ClientToServerMessage: NetworkMessage,
+        ClientToServerCommand: NetworkCommand,
+
     >(
         self,
     ) -> Builder {
-        self.add_system(tcp_client_sent_system::<S, C>())
-            .add_system(tcp_client_receive_system::<S, C>())
+        self.add_system(tcp_client_sent_system::<S, C, ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>())
+            .add_system(tcp_client_receive_system::<S, C, ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>())
     }
 }
 

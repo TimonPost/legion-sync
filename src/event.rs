@@ -1,13 +1,13 @@
+use std::collections::HashMap;
+use std::fmt::Debug;
+
+use legion::prelude::Entity;
+use serde::export::{fmt::Error, Formatter};
+
 use crate::{
     resources::RegisteredComponentsResource, tracking::re_exports::crossbeam_channel::Receiver,
     WorldAbstraction,
 };
-use legion::prelude::Entity;
-use std::collections::HashMap;
-
-pub use net_sync::ClientMessage;
-use serde::export::{fmt::Error, Formatter};
-use std::fmt::Debug;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub enum LegionEvent {

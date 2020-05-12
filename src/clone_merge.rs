@@ -1,10 +1,12 @@
-use crate::register::ComponentRegistrationRef;
+use std::collections::HashMap;
+
 use legion::{
     index::ComponentIndex,
     prelude::*,
     storage::{ComponentMeta, ComponentStorage, ComponentTypeId},
 };
-use std::collections::HashMap;
+
+use crate::register::ComponentRegistrationRef;
 
 /// A trivial clone merge impl that does nothing but copy data. All component types must be
 /// cloneable and no type transformations are allowed

@@ -1,4 +1,12 @@
+use std::{
+    net::{SocketAddr, TcpListener},
+    thread,
+    thread::JoinHandle,
+    time::Duration,
+};
+
 use legion::{filter::filter_fns::any, prelude::*, systems::schedule::Builder};
+
 use legion_sync::{
     components::UidComponent,
     filters::filter_fns::{all, modified, removed},
@@ -10,7 +18,7 @@ use legion_sync::{
     systems::{
         insert_received_entities_system,
         tcp::{tcp_client_sent_system, tcp_connection_listener, tcp_server_receive_system},
-        track_modifications_system, SchedulerExt,
+        track_modifications_system, BuilderExt,
     },
     tracking::*,
     ReceivedPacket,
@@ -18,12 +26,6 @@ use legion_sync::{
 use net_sync::{
     compression::{lz4::Lz4, CompressionStrategy},
     uid::UidAllocator,
-};
-use std::{
-    net::{SocketAddr, TcpListener},
-    thread,
-    thread::JoinHandle,
-    time::Duration,
 };
 
 #[sync]

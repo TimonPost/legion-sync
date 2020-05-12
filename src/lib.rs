@@ -1,3 +1,7 @@
+use legion::prelude::{Entity, World};
+
+use crate::register::ComponentRegistration;
+
 mod event;
 
 pub mod clone_merge;
@@ -12,20 +16,16 @@ pub mod register;
 
 pub mod universe;
 
-use crate::register::ComponentRegistration;
-use legion::prelude::{Entity, World};
-pub use net_sync::ClientMessage;
-
 pub mod tracking {
     //! Re-export of the [track](LINK) crate.
     //!
     //! Track struct data modifications.
 
-    pub use track::{preclude::*, *};
-
     pub use inventory;
     pub use legion::storage::ComponentTypeId;
+
     pub use legion_sync_macro::sync;
+    pub use track::{preclude::*, *};
 }
 
 pub fn create_copy_clone_impl() -> clone_merge::CopyCloneImpl {

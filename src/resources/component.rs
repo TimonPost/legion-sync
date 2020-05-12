@@ -1,5 +1,3 @@
-use crate::register::{ComponentRegister, ComponentRegistrationRef};
-use net_sync::uid::Uid;
 use std::{
     any::TypeId,
     collections::{
@@ -10,6 +8,10 @@ use std::{
     slice,
     sync::{Arc, Mutex, MutexGuard},
 };
+
+use net_sync::uid::Uid;
+
+use crate::register::{ComponentRegister, ComponentRegistrationRef};
 
 // Here we store three instances of registration storage's.
 // This is relatively cheap because they store references and allow us to retrieve an registration by key.

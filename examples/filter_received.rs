@@ -1,4 +1,5 @@
 use legion::prelude::{IntoQuery, Read, Resources, Schedulable, SystemBuilder, Universe};
+
 use legion_sync::{
     components::UidComponent,
     filters::filter_fns::{all, modified, removed},

@@ -1,9 +1,12 @@
 //! A number of components that can be used to synchronize and trace components.
 
-use crate::tracking::{serde_diff, Bincode, SerdeDiff};
-use net_sync::uid::Uid;
-use serde::{Deserialize, Serialize};
 use std::ops::{Deref, DerefMut};
+
+use serde::{Deserialize, Serialize};
+
+use net_sync::uid::Uid;
+
+use crate::tracking::{serde_diff, Bincode, SerdeDiff};
 
 /// A component with a random `UUID`.
 ///

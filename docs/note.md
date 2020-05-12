@@ -21,9 +21,7 @@
 | Packer                        | X | X | |    	
 | PostBoxResource               | X| | |            	
 | PostOfficeResource            | | X | |                	
-| RegisteredComponentsResource  | X | X | |                        	
-| RemovedEntities               | X | X |  |            	
-| TickResource                  | X | X | |        	
+| RegisteredComponentsResource  | X | X | |         
 | TrackResource                 | X | X | |        
 |                               | | | |
 | TcpClientResource             | X | | TCP (tcp-tranport) |            	

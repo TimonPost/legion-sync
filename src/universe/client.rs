@@ -1,70 +1,73 @@
-use crate::filters::filter_fns::registered;
-use crate::register::{ComponentRegistration, HashmapRegistery};
-use crate::resources::HashmapRegistry;
-use crate::resources::{PostBoxResource, RegisteredComponentsResource, TrackResource};
-use crate::universe::network::WorldMappingResource;
-use crate::{
-    resources::{EventResource, ResourcesExt, TickResource},
-    systems::SchedulerExt,
-    tracking::SerializationStrategy,
-    universe::{
-        network::{NetworkUniverse, WorldInstance},
-        UniverseBuilder,
-    },
-};
+use std::net::SocketAddr;
+use std::time::Instant;
+
 use legion::prelude::{CommandBuffer, World};
-use legion::world::{HashMapCloneImplResult, HashMapEntityReplacePolicy, Universe};
+use legion::world::Universe;
 use legion::{
     prelude::{Entity, Resources},
     systems::{resource::Resource, schedule::Builder},
 };
 use log::debug;
+
 use net_sync::compression::lz4::Lz4;
-use net_sync::state::ComponentRemoved;
-use net_sync::transport::PostBox;
-use net_sync::{
-    compression::CompressionStrategy,
-    state::WorldState,
-    uid::{Uid, UidAllocator},
-    ClientMessage, ServerMessage,
-};
-use std::collections::HashMap;
-use std::net::SocketAddr;
+use net_sync::synchronisation::{CommandFrameTicker, ClientCommandBuffer, ResimulationBuffer, ClientCommandBufferEntry, CommandFrame};
+use net_sync::transport::{PostBox, NetworkCommand, NetworkMessage};
+use net_sync::{compression::CompressionStrategy, state::WorldState, uid::{Uid, UidAllocator}, transport};
 use track::serialization::bincode::Bincode;
 
-pub struct ClientUniverseBuilder {
+use crate::filters::filter_fns::registered;
+use crate::resources::HashmapRegistry;
+use crate::resources::RegisteredComponentsResource;
+use crate::{
+    resources::{EventResource, ResourcesExt},
+    systems::BuilderExt,
+    tracking::SerializationStrategy,
+    universe::{network::WorldInstance, UniverseBuilder},
+};
+use std::marker::PhantomData;
+
+pub struct ClientUniverseBuilder<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage,ClientToServerCommand: NetworkCommand>
+{
     resources: Resources,
-    remote_builder: Builder,
-    main_builder: Builder,
+    system_builder: Builder,
+
+    stcm: PhantomData<ServerToClientMessage>,
+    ctsm: PhantomData<ClientToServerMessage>,
+    ctsc: PhantomData<ClientToServerCommand>
 }
 
-impl Default for ClientUniverseBuilder {
+impl<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage,ClientToServerCommand: NetworkCommand>  Default for ClientUniverseBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+{
     fn default() -> Self {
         ClientUniverseBuilder {
             resources: Default::default(),
-            remote_builder: Builder::default(),
-            main_builder: Builder::default(),
+            system_builder: Builder::default(),
+
+            stcm: PhantomData,
+            ctsm: PhantomData,
+            ctsc: PhantomData
         }
         .default_resources::<Bincode, Lz4>()
         .default_systems()
     }
 }
 
-impl UniverseBuilder for ClientUniverseBuilder {
-    type BuildResult = ClientUniverse;
+impl<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage,ClientToServerCommand: NetworkCommand,> UniverseBuilder for ClientUniverseBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+{
+    type BuildResult = ClientUniverse<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand> ;
 
     fn default_resources<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
         self,
     ) -> Self {
         let mut s = self;
         s.resources
-            .insert_client_resources(S::default(), C::default());
+            .insert_client_resources::<S,C,ClientToServerCommand>(S::default(), C::default());
         s
     }
 
     fn default_systems(self) -> Self {
         let mut s = self;
-        s.main_builder = s.main_builder.add_client_systems();
+        s.system_builder = s.system_builder.add_client_systems();
         s
     }
 
@@ -74,15 +77,9 @@ impl UniverseBuilder for ClientUniverseBuilder {
         s
     }
 
-    fn register_main_systems(self, user_system_builder: fn(Builder) -> Builder) -> Self {
+    fn register_systems(self, user_system_builder: fn(Builder) -> Builder) -> Self {
         let mut s = self;
-        s.main_builder = user_system_builder(s.main_builder);
-        s
-    }
-
-    fn register_remote_systems(self, user_system_builder: fn(Builder) -> Builder) -> Self {
-        let mut s = self;
-        s.remote_builder = user_system_builder(Builder::default());
+        s.system_builder = user_system_builder(s.system_builder);
         s
     }
 
@@ -90,36 +87,53 @@ impl UniverseBuilder for ClientUniverseBuilder {
         let mut s = self;
         let universe = Universe::new();
         let mut main_world = universe.create_world();
-        let remote_world = universe.create_world();
 
         s.resources
             .insert(EventResource::new(&mut main_world, registered()));
 
-        let main_world = WorldInstance::new(main_world, s.main_builder.build());
+        let main_world = WorldInstance::new(main_world, s.system_builder.build());
 
         ClientUniverse::new(s.resources, main_world)
     }
 }
 
-impl ClientUniverseBuilder {
+impl<ServerToClientMessage: NetworkMessage, ClientToServerMessage: NetworkMessage, ClientToServerCommand: NetworkCommand>  ClientUniverseBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+{
     pub fn with_tcp<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
         mut self,
         addr: SocketAddr,
     ) -> Self {
-        self.main_builder = self.main_builder.add_tcp_client_systems::<S, C>();
-        self.resources.insert_tcp_client_resources(addr);
+        self.system_builder = self.system_builder.add_tcp_client_systems::<S, C, ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>();
+        self.resources.insert_tcp_client_resources::<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>(addr);
         self
     }
 }
 
-pub struct ClientUniverse {
+pub struct ClientUniverse<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage,ClientToServerCommand: NetworkCommand>
+{
     pub(crate) world: WorldInstance,
     pub(crate) resources: Resources,
+    // TODO: HACK, REMOVE!
+    has_received_first_message: bool,
+
+    stcm: PhantomData<ServerToClientMessage>,
+    ctsm: PhantomData<ClientToServerMessage>,
+    ctsc: PhantomData<ClientToServerCommand>
 }
 
-impl ClientUniverse {
-    pub fn new(resources: Resources, world: WorldInstance) -> ClientUniverse {
-        ClientUniverse { world, resources }
+impl<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage,ClientToServerCommand: NetworkCommand> ClientUniverse<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+{
+
+    pub fn new(resources: Resources, world: WorldInstance) -> ClientUniverse<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand> {
+        ClientUniverse {
+            world,
+            resources,
+            has_received_first_message: false,
+
+            stcm: PhantomData,
+            ctsm: PhantomData,
+            ctsc: PhantomData
+        }
     }
 
     pub fn world(&mut self) -> &mut World {
@@ -131,17 +145,22 @@ impl ClientUniverse {
 
         self.world.execute(resources);
 
-        let tick = resources.get_mut::<TickResource>().unwrap().tick();
+        let mut command_ticker = resources.get_mut::<CommandFrameTicker>().unwrap();
 
-        if tick % 10 == 0 {
-            let mut postbox = resources.get_mut::<PostBoxResource>().unwrap();
+        if command_ticker.try_tick() {
+            debug!("Universe Tick");
+            let mut postbox = resources
+                .get_mut::<PostBox<transport::ServerToClientMessage<ServerToClientMessage>, transport::ClientToServerMessage<ClientToServerMessage, ClientToServerCommand>>>()
+                .unwrap();
+
             let mut uid_allocator = resources.get_mut::<UidAllocator<Entity>>().unwrap();
-            let mut registered = resources.get_mut::<RegisteredComponentsResource>().unwrap();
-            let mut track_resource = resources.get_mut::<TrackResource>().unwrap();
+            let registered = resources.get_mut::<RegisteredComponentsResource>().unwrap();
+            let mut client_buffer = resources.get_mut::<ClientCommandBuffer<ClientToServerCommand>>().unwrap();
+            let mut resimulation_buffer = resources.get_mut::<ResimulationBuffer<ClientToServerCommand>>().unwrap();
 
+            debug!("Draining Inbox Tick");
             let inbox = postbox.drain_inbox(|m| match m {
-                ServerMessage::StateUpdate(_) => true,
-                ServerMessage::EntityInsertAck(_, _) => true,
+                transport::ServerToClientMessage::StateUpdate(_) => true,
                 _ => false,
             });
 
@@ -149,91 +168,111 @@ impl ClientUniverse {
 
             for packet in inbox {
                 match packet {
-                    ServerMessage::StateUpdate(update) => {
+                    transport::ServerToClientMessage::StateUpdate(update) => {
+                        if !self.has_received_first_message {
+                            self.has_received_first_message = true;
+                            command_ticker.set_command_frame(update.command_frame + 4);
+                        }
+
                         let mut state_updater = StateUpdater::new(
                             &mut uid_allocator,
                             &mut self.world.world,
                             &registered_by_uuid,
                             &update,
-                            &mut track_resource,
+                            &mut client_buffer,
+                            &mut resimulation_buffer,
+                            command_ticker.command_frame()
                         );
+
                         state_updater.apply_entity_removals();
                         state_updater.apply_entity_inserts();
                         state_updater.apply_removed_components();
                         state_updater.apply_added_components();
                         state_updater.apply_changed_components();
+
+                        println!("{}", update.command_frame_offset);
                     }
-                    ServerMessage::EntityInsertAck(client_entity_id, server_entity_id) => {
-                        uid_allocator.replace_val(client_entity_id, server_entity_id);
-                    }
+                    _ => {}
                 }
             }
-        }
 
-        resources.get_mut::<TickResource>().unwrap().increment();
+            // Sent commands to server
+
+            if let Some(command) = client_buffer
+                .iterate_frames(command_ticker.command_frame())
+                .last()
+                .cloned()
+            {
+                postbox.send(transport::ClientToServerMessage::Command(
+                    command.command_frame,
+                    command.command,
+                ))
+            }
+        }
+    }
+
+
+    pub fn resources(&self) -> &Resources {
+        &self.resources
     }
 
     pub fn resources_mut(&mut self) -> &mut Resources {
         &mut self.resources
     }
-
-    pub fn new_entity_id(&self, entity: Entity) -> Uid {
-        let mut borrow = self.resources.get_mut::<UidAllocator<Entity>>().unwrap();
-        borrow.allocate(entity, None)
-    }
 }
 
-struct StateUpdater<'a> {
+struct StateUpdater<'a, C: NetworkCommand> {
     allocator: &'a mut UidAllocator<Entity>,
     world: &'a mut World,
     registration_by_uuid: &'a HashmapRegistry<'a, Uid>,
     update: &'a WorldState,
-    track_resource: &'a mut TrackResource,
+    client_buffer: &'a mut ClientCommandBuffer<C>,
+    resimmulation_buffer: &'a mut ResimulationBuffer<C>,
+    current_command_frame: CommandFrame,
 }
 
-impl<'a> StateUpdater<'a> {
+impl<'a, C: NetworkCommand> StateUpdater<'a, C> {
     pub fn new(
         allocator: &'a mut UidAllocator<Entity>,
         world: &'a mut World,
         registration_by_uuid: &'a HashmapRegistry<'a, Uid>,
         update: &'a WorldState,
-        track_resource: &'a mut TrackResource,
-    ) -> StateUpdater<'a> {
+        client_buffer: &'a mut ClientCommandBuffer<C>,
+        resimmulation_buffer: &'a mut ResimulationBuffer<C>,
+        current_command_frame: CommandFrame,
+    ) -> StateUpdater<'a, C> {
         StateUpdater {
             allocator,
             world,
             registration_by_uuid,
             update,
-            track_resource,
+            client_buffer,
+            current_command_frame: current_command_frame,
+            resimmulation_buffer
         }
     }
 
     // Handle remove events, and clear mappings to prevent merge of removed entities and delete entity from worlds.
     fn apply_entity_removals(&mut self) {
         debug!("State Update; Removing Entities...");
-        for entity_id in self.update.removed.iter() {
-            let entity = self.allocator.get_by_val(entity_id).clone();
+        for to_remove_entity in self.update.removed.iter() {
+            let entity = self.allocator.get_by_val(to_remove_entity).clone();
 
             self.world.delete(entity);
 
             self.allocator
                 .deallocate(entity)
                 .expect("Entity should be allocated.");
-
-            self.track_resource.remove(*entity_id as usize);
         }
     }
 
     fn apply_entity_inserts(&mut self) {
         debug!("State Update; Inserting entities...");
-        for to_insert in self.update.inserted.iter() {
-            let entity = self.allocator.get_by_val(&to_insert.entity_id()).clone();
-            self.world.delete(entity);
-
+        for to_insert_entity in self.update.inserted.iter() {
             let mut buffer = CommandBuffer::new(&self.world);
             let entity = buffer.start_entity().build();
 
-            for component in to_insert.components() {
+            for component in to_insert_entity.components() {
                 let component_registration = self
                     .registration_by_uuid
                     .get(&component.component_id())
@@ -243,10 +282,7 @@ impl<'a> StateUpdater<'a> {
 
             buffer.write(self.world);
 
-            self.allocator.allocate(entity, Some(to_insert.entity_id()));
-
-            self.track_resource.insert(to_insert.entity_id() as usize);
-            self.track_resource.remove(to_insert.entity_id() as usize);
+            self.allocator.allocate(entity, Some(to_insert_entity.entity_id()));
         }
     }
 
@@ -259,9 +295,6 @@ impl<'a> StateUpdater<'a> {
                 .get(&to_remove_component.component_id())
                 .expect("Component should be registered.");
             component_registration.remove_component(self.world, *entity);
-
-            self.track_resource
-                .component_unset(to_remove_component.entity_id() as usize);
         }
     }
 
@@ -275,22 +308,45 @@ impl<'a> StateUpdater<'a> {
                 .get(&component_data.component_id())
                 .expect("Component should be registered.");
             component_registration.add_component(self.world, *entity, component_data.data());
-
-            self.track_resource
-                .component_add(to_add_component.entity_id() as usize);
         }
     }
 
     fn apply_changed_components(&mut self) {
         debug!("State Update; Changing components...");
+
         for changed in self.update.changed.iter() {
             let entity = self.allocator.get_by_val(&changed.entity_id());
-            let component_data = changed.component_data();
+            let server_component_changes = changed.component_data();
+
+            let frame = self.client_buffer.frame(self.update.command_frame);
+
+            if let Some(frame) = frame {
+                let data = changed.component_data().data();
+
+                if data == &frame.changed_data {
+                    println!("Predicted Same")
+                }else {
+                    println!("Predicted Wrong");
+
+                    let to_resimulate = self.client_buffer.iterate_frames(self.current_command_frame - self.update.command_frame)
+                        .cloned()
+                        .collect::<Vec<ClientCommandBufferEntry<C>>>();
+
+                    self.resimmulation_buffer.push(self.update.command_frame, self.update.command_frame, data.to_owned(), to_resimulate);
+                }
+            }
+
             let component_registration = self
                 .registration_by_uuid
-                .get(&component_data.component_id())
+                .get(&server_component_changes.component_id())
                 .expect("Component should be registered.");
-            component_registration.apply_changes(self.world, *entity, component_data.data());
+
+            component_registration.apply_changes(
+                self.world,
+                *entity,
+                server_component_changes.data(),
+            );
+            //            component_registration.apply_changes(self.world, *entity, client_component_changes.data());
         }
     }
 }

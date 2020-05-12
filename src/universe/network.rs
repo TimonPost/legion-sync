@@ -1,16 +1,5 @@
-use crate::{
-    event::{LegionEvent, LegionEventHandler},
-    resources::{EventResource, RegisteredComponentsResource, RemovedEntities},
-};
 use legion::{
-    prelude::{Entity, Resources, Schedule, World},
-    world::{HashMapCloneImplResult, HashMapEntityReplacePolicy, Universe},
-};
-use log::debug;
-use net_sync::{state::WorldState, uid::UidAllocator, ComponentData};
-use std::{
-    collections::HashMap,
-    ops::{Deref, DerefMut},
+    prelude::{Resources, Schedule, World},
 };
 
 pub struct WorldInstance {
@@ -28,88 +17,16 @@ impl WorldInstance {
     }
 }
 
-pub struct WorldMappingResource {
-    pub(crate) replace_mappings: HashMap<Entity, Entity>,
-}
-
-impl WorldMappingResource {
-    pub fn remote_representative(&self, entity: Entity) -> Option<Entity> {
-        self.replace_mappings
-            .iter()
-            .find(|(remote, main)| **main == entity)
-            .map(|val| *val.0)
-    }
-
-    pub fn refresh_mappings(&mut self, result_mappings: HashMap<Entity, Entity>) {
-        self.replace_mappings
-            .extend(result_mappings.iter().map(|(k, v)| (k.clone(), v.clone())));
-    }
-}
-
-impl Default for WorldMappingResource {
-    fn default() -> Self {
-        WorldMappingResource {
-            replace_mappings: HashMap::new(),
-        }
-    }
-}
-
-pub struct NetworkUniverse {
-    pub(crate) universe: Universe,
-    pub(crate) main: WorldInstance,
-    pub(crate) remote: WorldInstance,
-}
-
-impl NetworkUniverse {
-    pub fn new(universe: Universe, main: WorldInstance, remote: WorldInstance) -> NetworkUniverse {
-        NetworkUniverse {
-            universe,
-            main,
-            remote,
-        }
-    }
-
-    pub fn merge_into(&mut self, resources: &mut WorldMappingResource) {
-
-    }
-
-    pub fn create_world(&self) -> World {
-        self.universe.create_world()
-    }
-
-    pub fn remote_world(&self) -> &World {
-        &self.remote.world
-    }
-
-    pub fn main_world(&self) -> &World {
-        &self.main.world
-    }
-
-    pub fn remote_world_mut(&mut self) -> &mut World {
-        &mut self.remote.world
-    }
-
-    pub fn main_world_mut(&mut self) -> &mut World {
-        &mut self.main.world
-    }
-}
-
-impl Deref for NetworkUniverse {
-    type Target = Universe;
-
-    fn deref(&self) -> &Self::Target {
-        &self.universe
-    }
-}
-
-impl DerefMut for NetworkUniverse {
-    fn deref_mut(&mut self) -> &mut Self::Target {
-        &mut self.universe
-    }
-}
-
 #[cfg(test)]
 pub mod test {
+    use legion::{
+        borrow::Ref,
+        prelude::{Entity, Resources, Schedule, Universe},
+        query::{IntoQuery, Read},
+    };
+
+    use net_sync::{state::WorldState, uid::UidAllocator};
+
     pub use crate as legion_sync;
     use crate::filters::filter_fns::registered;
     use crate::universe::network::WorldMappingResource;
@@ -119,12 +36,6 @@ pub mod test {
         tracking::*,
         universe::network::{NetworkUniverse, WorldInstance},
     };
-    use legion::{
-        borrow::Ref,
-        prelude::{Entity, Resources, Schedule, Universe},
-        query::{IntoQuery, Read},
-    };
-    use net_sync::{state::WorldState, uid::UidAllocator};
 
     #[sync]
     #[derive(Debug)]
@@ -153,7 +64,6 @@ pub mod test {
         let query = <Read<Position>>::query();
 
         let mut resources = Resources::default();
-        resources.insert(RemovedEntities::new());
         resources.insert(UidAllocator::<Entity>::new());
         resources.insert(RegisteredComponentsResource::new());
         resources.insert(EventResource::new(universe.main_world_mut(), registered()));
