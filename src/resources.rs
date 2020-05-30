@@ -4,11 +4,20 @@ use std::net::{SocketAddr, TcpListener};
 
 use legion::prelude::{Entity, Resources};
 
-use net_sync::packer::Packer;
-use net_sync::track::TrackResource;
-use net_sync::transport::tcp::{TcpClientResource, TcpListenerResource};
-use net_sync::transport::{PostBox, PostOffice, NetworkMessage, NetworkCommand};
-use net_sync::{compression::CompressionStrategy, uid::UidAllocator, transport};
+use net_sync::{
+    compression::CompressionStrategy,
+    packer::Packer,
+    transport,
+    transport::{
+        NetworkCommand,
+        NetworkMessage, PostBox, PostOffice, tcp::{TcpClientResource, TcpListenerResource},
+    },
+    uid::UidAllocator,
+};
+use net_sync::{
+    synchronisation::{ClientCommandBuffer, CommandFrameTicker, ResimulationBuffer},
+    tracker::TrackResource,
+};
 
 use crate::tracking::SerializationStrategy;
 
@@ -17,7 +26,6 @@ pub use self::{
     component::{HashmapRegistry, RegisteredComponentsResource},
     event::EventResource,
 };
-use net_sync::synchronisation::{CommandFrameTicker, ClientCommandBuffer, ResimulationBuffer};
 
 mod buffer;
 mod component;
@@ -39,7 +47,7 @@ pub trait ResourcesExt {
     fn insert_client_resources<
         S: SerializationStrategy + 'static,
         C: CompressionStrategy + 'static,
-        ClientToServerCommand:  NetworkCommand
+        ClientToServerCommand: NetworkCommand,
     >(
         &mut self,
         serialization: S,
@@ -52,7 +60,14 @@ pub trait ResourcesExt {
         compression: C,
     );
 
-    fn insert_tcp_client_resources<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage,ClientToServerCommand: NetworkCommand>(&mut self, addr: SocketAddr);
+    fn insert_tcp_client_resources<
+        ServerToClientMessage: NetworkMessage,
+        ClientToServerMessage: NetworkMessage,
+        ClientToServerCommand: NetworkCommand,
+    >(
+        &mut self,
+        addr: SocketAddr,
+    );
     fn insert_tcp_listener_resources(&mut self, listener: TcpListener);
 }
 
@@ -68,23 +83,28 @@ impl ResourcesExt for Resources {
         serialization: S,
         compression: C,
     ) {
-        self.insert(PostOffice::<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>::new());
+        self.insert(PostOffice::<
+            ServerToClientMessage,
+            ClientToServerMessage,
+            ClientToServerCommand,
+        >::new());
         self.insert_required(serialization, compression);
     }
 
     fn insert_client_resources<
         S: SerializationStrategy + 'static,
         C: CompressionStrategy + 'static,
-        ClientToServerCommand:  NetworkCommand
+        ClientToServerCommand: NetworkCommand,
     >(
         &mut self,
         serialization: S,
         compression: C,
     ) {
-        self.insert(ClientCommandBuffer::<ClientToServerCommand>::with_capacity(10));
+        self.insert(ClientCommandBuffer::<ClientToServerCommand>::with_capacity(
+            10,
+        ));
         self.insert(ResimulationBuffer::<ClientToServerCommand>::new());
         self.insert_required(serialization, compression);
-
     }
 
     fn insert_required<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
@@ -100,8 +120,18 @@ impl ResourcesExt for Resources {
         self.insert(CommandFrameTicker::new(200.))
     }
 
-    fn insert_tcp_client_resources<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage,ClientToServerCommand: NetworkCommand>(&mut self, addr: SocketAddr) {
-        self.insert( PostBox::<transport::ServerToClientMessage<ServerToClientMessage>, transport::ClientToServerMessage<ClientToServerMessage, ClientToServerCommand>>::new());
+    fn insert_tcp_client_resources<
+        ServerToClientMessage: NetworkMessage,
+        ClientToServerMessage: NetworkMessage,
+        ClientToServerCommand: NetworkCommand,
+    >(
+        &mut self,
+        addr: SocketAddr,
+    ) {
+        self.insert(PostBox::<
+            transport::ServerToClientMessage<ServerToClientMessage>,
+            transport::ClientToServerMessage<ClientToServerMessage, ClientToServerCommand>,
+        >::new());
         self.insert(TcpClientResource::new(addr).unwrap());
     }
 

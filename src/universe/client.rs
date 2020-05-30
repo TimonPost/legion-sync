@@ -1,67 +1,86 @@
+use std::marker::PhantomData;
 use std::net::SocketAddr;
-use std::time::Instant;
 
-use legion::prelude::{CommandBuffer, World};
-use legion::world::Universe;
+use itertools::Itertools;
 use legion::{
-    prelude::{Entity, Resources},
+    prelude::{CommandBuffer, Entity, Resources, World},
     systems::{resource::Resource, schedule::Builder},
+    world::Universe,
 };
 use log::debug;
 
-use net_sync::compression::lz4::Lz4;
-use net_sync::synchronisation::{CommandFrameTicker, ClientCommandBuffer, ResimulationBuffer, ClientCommandBufferEntry, CommandFrame};
-use net_sync::transport::{PostBox, NetworkCommand, NetworkMessage};
-use net_sync::{compression::CompressionStrategy, state::WorldState, uid::{Uid, UidAllocator}, transport};
-use track::serialization::bincode::Bincode;
+use net_sync::{
+    ComponentData,
+    compression::{CompressionStrategy, lz4::Lz4},
+    serialization::bincode::Bincode,
+    state::{ComponentChanged, WorldState},
+    synchronisation::{
+        ClientCommandBuffer, ClientCommandBufferEntry, CommandFrame, CommandFrameTicker,
+        ResimulationBuffer,
+    },
+    transport,
+    transport::{NetworkCommand, NetworkMessage, PostBox},
+    uid::UidAllocator,
+};
 
-use crate::filters::filter_fns::registered;
-use crate::resources::HashmapRegistry;
-use crate::resources::RegisteredComponentsResource;
 use crate::{
-    resources::{EventResource, ResourcesExt},
+    filters::filter_fns::registered,
+    resources::{EventResource, RegisteredComponentsResource, ResourcesExt},
     systems::BuilderExt,
     tracking::SerializationStrategy,
     universe::{network::WorldInstance, UniverseBuilder},
 };
-use std::marker::PhantomData;
 
-pub struct ClientUniverseBuilder<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage,ClientToServerCommand: NetworkCommand>
-{
+pub struct ClientWorldBuilder<
+    ServerToClientMessage: NetworkMessage,
+    ClientToServerMessage: NetworkMessage,
+    ClientToServerCommand: NetworkCommand,
+> {
     resources: Resources,
     system_builder: Builder,
 
     stcm: PhantomData<ServerToClientMessage>,
     ctsm: PhantomData<ClientToServerMessage>,
-    ctsc: PhantomData<ClientToServerCommand>
+    ctsc: PhantomData<ClientToServerCommand>,
 }
 
-impl<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage,ClientToServerCommand: NetworkCommand>  Default for ClientUniverseBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+impl<
+    ServerToClientMessage: NetworkMessage,
+    ClientToServerMessage: NetworkMessage,
+    ClientToServerCommand: NetworkCommand,
+> Default
+for ClientWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
 {
     fn default() -> Self {
-        ClientUniverseBuilder {
+        ClientWorldBuilder {
             resources: Default::default(),
             system_builder: Builder::default(),
 
             stcm: PhantomData,
             ctsm: PhantomData,
-            ctsc: PhantomData
+            ctsc: PhantomData,
         }
-        .default_resources::<Bincode, Lz4>()
-        .default_systems()
+            .default_resources::<Bincode, Lz4>()
+            .default_systems()
     }
 }
 
-impl<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage,ClientToServerCommand: NetworkCommand,> UniverseBuilder for ClientUniverseBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+impl<
+    ServerToClientMessage: NetworkMessage,
+    ClientToServerMessage: NetworkMessage,
+    ClientToServerCommand: NetworkCommand,
+> UniverseBuilder
+for ClientWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
 {
-    type BuildResult = ClientUniverse<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand> ;
+    type BuildResult =
+    ClientWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>;
 
     fn default_resources<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
         self,
     ) -> Self {
         let mut s = self;
         s.resources
-            .insert_client_resources::<S,C,ClientToServerCommand>(S::default(), C::default());
+            .insert_client_resources::<S, C, ClientToServerCommand>(S::default(), C::default());
         s
     }
 
@@ -93,11 +112,15 @@ impl<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage
 
         let main_world = WorldInstance::new(main_world, s.system_builder.build());
 
-        ClientUniverse::new(s.resources, main_world)
+        ClientWorld::new(s.resources, main_world)
     }
 }
 
-impl<ServerToClientMessage: NetworkMessage, ClientToServerMessage: NetworkMessage, ClientToServerCommand: NetworkCommand>  ClientUniverseBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+impl<
+    ServerToClientMessage: NetworkMessage,
+    ClientToServerMessage: NetworkMessage,
+    ClientToServerCommand: NetworkCommand,
+> ClientWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
 {
     pub fn with_tcp<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
         mut self,
@@ -109,8 +132,11 @@ impl<ServerToClientMessage: NetworkMessage, ClientToServerMessage: NetworkMessag
     }
 }
 
-pub struct ClientUniverse<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage,ClientToServerCommand: NetworkCommand>
-{
+pub struct ClientWorld<
+    ServerToClientMessage: NetworkMessage,
+    ClientToServerMessage: NetworkMessage,
+    ClientToServerCommand: NetworkCommand,
+> {
     pub(crate) world: WorldInstance,
     pub(crate) resources: Resources,
     // TODO: HACK, REMOVE!
@@ -118,21 +144,27 @@ pub struct ClientUniverse<ServerToClientMessage: NetworkMessage,ClientToServerMe
 
     stcm: PhantomData<ServerToClientMessage>,
     ctsm: PhantomData<ClientToServerMessage>,
-    ctsc: PhantomData<ClientToServerCommand>
+    ctsc: PhantomData<ClientToServerCommand>,
 }
 
-impl<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage,ClientToServerCommand: NetworkCommand> ClientUniverse<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+impl<
+    ServerToClientMessage: NetworkMessage,
+    ClientToServerMessage: NetworkMessage,
+    ClientToServerCommand: NetworkCommand,
+> ClientWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
 {
-
-    pub fn new(resources: Resources, world: WorldInstance) -> ClientUniverse<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand> {
-        ClientUniverse {
+    pub fn new(
+        resources: Resources,
+        world: WorldInstance,
+    ) -> ClientWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand> {
+        ClientWorld {
             world,
             resources,
             has_received_first_message: false,
 
             stcm: PhantomData,
             ctsm: PhantomData,
-            ctsc: PhantomData
+            ctsc: PhantomData,
         }
     }
 
@@ -150,13 +182,20 @@ impl<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage
         if command_ticker.try_tick() {
             debug!("Universe Tick");
             let mut postbox = resources
-                .get_mut::<PostBox<transport::ServerToClientMessage<ServerToClientMessage>, transport::ClientToServerMessage<ClientToServerMessage, ClientToServerCommand>>>()
+                .get_mut::<PostBox<
+                    transport::ServerToClientMessage<ServerToClientMessage>,
+                    transport::ClientToServerMessage<ClientToServerMessage, ClientToServerCommand>,
+                >>()
                 .unwrap();
 
             let mut uid_allocator = resources.get_mut::<UidAllocator<Entity>>().unwrap();
             let registered = resources.get_mut::<RegisteredComponentsResource>().unwrap();
-            let mut client_buffer = resources.get_mut::<ClientCommandBuffer<ClientToServerCommand>>().unwrap();
-            let mut resimulation_buffer = resources.get_mut::<ResimulationBuffer<ClientToServerCommand>>().unwrap();
+            let mut client_buffer = resources
+                .get_mut::<ClientCommandBuffer<ClientToServerCommand>>()
+                .unwrap();
+            let mut resimulation_buffer = resources
+                .get_mut::<ResimulationBuffer<ClientToServerCommand>>()
+                .unwrap();
 
             debug!("Draining Inbox Tick");
             let inbox = postbox.drain_inbox(|m| match m {
@@ -164,24 +203,23 @@ impl<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage
                 _ => false,
             });
 
-            let registered_by_uuid = registered.by_uid();
-
             for packet in inbox {
                 match packet {
                     transport::ServerToClientMessage::StateUpdate(update) => {
                         if !self.has_received_first_message {
+                            debug!("Initial Status Update");
                             self.has_received_first_message = true;
-                            command_ticker.set_command_frame(update.command_frame + 4);
+                            command_ticker.set_command_frame(update.command_frame + 2);
                         }
 
                         let mut state_updater = StateUpdater::new(
                             &mut uid_allocator,
                             &mut self.world.world,
-                            &registered_by_uuid,
+                            &registered,
                             &update,
                             &mut client_buffer,
                             &mut resimulation_buffer,
-                            command_ticker.command_frame()
+                            command_ticker.command_frame(),
                         );
 
                         state_updater.apply_entity_removals();
@@ -189,8 +227,6 @@ impl<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage
                         state_updater.apply_removed_components();
                         state_updater.apply_added_components();
                         state_updater.apply_changed_components();
-
-                        println!("{}", update.command_frame_offset);
                     }
                     _ => {}
                 }
@@ -198,19 +234,18 @@ impl<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage
 
             // Sent commands to server
 
-            if let Some(command) = client_buffer
-                .iterate_frames(command_ticker.command_frame())
-                .last()
-                .cloned()
-            {
+            for command in client_buffer.iter_history(1) {
+                debug!("Send Command");
+
                 postbox.send(transport::ClientToServerMessage::Command(
-                    command.command_frame,
-                    command.command,
-                ))
+                    command.command_frame.clone(),
+                    command.command.clone(),
+                ));
+
+                command.is_sent = true;
             }
         }
     }
-
 
     pub fn resources(&self) -> &Resources {
         &self.resources
@@ -224,7 +259,7 @@ impl<ServerToClientMessage: NetworkMessage,ClientToServerMessage: NetworkMessage
 struct StateUpdater<'a, C: NetworkCommand> {
     allocator: &'a mut UidAllocator<Entity>,
     world: &'a mut World,
-    registration_by_uuid: &'a HashmapRegistry<'a, Uid>,
+    registry: &'a RegisteredComponentsResource,
     update: &'a WorldState,
     client_buffer: &'a mut ClientCommandBuffer<C>,
     resimmulation_buffer: &'a mut ResimulationBuffer<C>,
@@ -235,7 +270,7 @@ impl<'a, C: NetworkCommand> StateUpdater<'a, C> {
     pub fn new(
         allocator: &'a mut UidAllocator<Entity>,
         world: &'a mut World,
-        registration_by_uuid: &'a HashmapRegistry<'a, Uid>,
+        registry: &'a RegisteredComponentsResource,
         update: &'a WorldState,
         client_buffer: &'a mut ClientCommandBuffer<C>,
         resimmulation_buffer: &'a mut ResimulationBuffer<C>,
@@ -244,11 +279,11 @@ impl<'a, C: NetworkCommand> StateUpdater<'a, C> {
         StateUpdater {
             allocator,
             world,
-            registration_by_uuid,
+            registry,
             update,
             client_buffer,
-            current_command_frame: current_command_frame,
-            resimmulation_buffer
+            current_command_frame,
+            resimmulation_buffer,
         }
     }
 
@@ -268,13 +303,15 @@ impl<'a, C: NetworkCommand> StateUpdater<'a, C> {
 
     fn apply_entity_inserts(&mut self) {
         debug!("State Update; Inserting entities...");
+
+        let registry_by_id = self.registry.by_uid();
+
         for to_insert_entity in self.update.inserted.iter() {
             let mut buffer = CommandBuffer::new(&self.world);
             let entity = buffer.start_entity().build();
 
             for component in to_insert_entity.components() {
-                let component_registration = self
-                    .registration_by_uuid
+                let component_registration = registry_by_id
                     .get(&component.component_id())
                     .expect("Component should be registered.");
                 component_registration.deserialize(&buffer, entity, component.data());
@@ -282,16 +319,19 @@ impl<'a, C: NetworkCommand> StateUpdater<'a, C> {
 
             buffer.write(self.world);
 
-            self.allocator.allocate(entity, Some(to_insert_entity.entity_id()));
+            self.allocator
+                .allocate(entity, Some(to_insert_entity.entity_id()));
         }
     }
 
     fn apply_removed_components(&mut self) {
         debug!("State Update; Removing components...");
+
+        let registry_by_id = self.registry.by_uid();
+
         for to_remove_component in self.update.component_removed.iter() {
             let entity = self.allocator.get_by_val(&to_remove_component.entity_id());
-            let component_registration = self
-                .registration_by_uuid
+            let component_registration = registry_by_id
                 .get(&to_remove_component.component_id())
                 .expect("Component should be registered.");
             component_registration.remove_component(self.world, *entity);
@@ -300,11 +340,13 @@ impl<'a, C: NetworkCommand> StateUpdater<'a, C> {
 
     fn apply_added_components(&mut self) {
         debug!("State Update; Adding components...");
+
+        let registry_by_id = self.registry.by_uid();
+
         for to_add_component in self.update.component_added.iter() {
             let entity = self.allocator.get_by_val(&to_add_component.entity_id());
             let component_data = to_add_component.component_data();
-            let component_registration = self
-                .registration_by_uuid
+            let component_registration = registry_by_id
                 .get(&component_data.component_id())
                 .expect("Component should be registered.");
             component_registration.add_component(self.world, *entity, component_data.data());
@@ -314,39 +356,82 @@ impl<'a, C: NetworkCommand> StateUpdater<'a, C> {
     fn apply_changed_components(&mut self) {
         debug!("State Update; Changing components...");
 
-        for changed in self.update.changed.iter() {
-            let entity = self.allocator.get_by_val(&changed.entity_id());
-            let server_component_changes = changed.component_data();
+        let mut to_resimmulate = Vec::new();
+        let registry_by_type = self.registry.by_type_id();
 
-            let frame = self.client_buffer.frame(self.update.command_frame);
+        let update_command_frame = self.update.command_frame;
+        for (grouped_entity_id, group) in &self
+            .client_buffer
+            .iter()
+            .filter(|x| x.command_frame == update_command_frame)
+            .group_by(|x| x.entity_id)
+        {
+            let group: Vec<&ClientCommandBufferEntry<C>> = group.collect();
 
-            if let Some(frame) = frame {
-                let data = changed.component_data().data();
+            // Take the first first and last change.
+            // The buffer stores entries from newest to oldest changes therefore, the newest change is the first result.
+            let oldest_change: &&ClientCommandBufferEntry<C> = group
+                .last()
+                .expect("Should have at least one element because of the filter.");
+            let newest_change: &&ClientCommandBufferEntry<C> = group
+                .first()
+                .expect("Should have at least one element because of the filter.");
 
-                if data == &frame.changed_data {
-                    println!("Predicted Same")
-                }else {
-                    println!("Predicted Wrong");
+            let entity = self.allocator.get_by_val(&grouped_entity_id);
+            let registration = registry_by_type
+                .get(&oldest_change.component_type)
+                .expect("Should exist");
 
-                    let to_resimulate = self.client_buffer.iterate_frames(self.current_command_frame - self.update.command_frame)
-                        .cloned()
-                        .collect::<Vec<ClientCommandBufferEntry<C>>>();
+            match registration
+                .serialize_difference(&oldest_change.unchanged_data, &newest_change.changed_data)
+            {
+                Ok(Some(client_difference)) => {
+                    let client_state = ComponentData::new(
+                        *self
+                            .registry
+                            .get_uid(&oldest_change.component_type)
+                            .expect("Should exist"),
+                        client_difference,
+                    );
+                    let client_state_match = self
+                        .update
+                        .changed
+                        .get(&ComponentChanged(oldest_change.entity_id, client_state));
 
-                    self.resimmulation_buffer.push(self.update.command_frame, self.update.command_frame, data.to_owned(), to_resimulate);
+                    if client_state_match.is_none() {
+                        debug!("Predicted Wrong");
+                        let server_difference = self
+                            .update
+                            .changed
+                            .iter()
+                            .find(|val| val.0 == oldest_change.entity_id)
+                            .expect("");
+
+                        to_resimmulate.push(oldest_change.entity_id);
+
+                        registration.apply_changes(self.world, *entity, server_difference.1.data());
+                    } else {
+                        debug!("Predicted Same");
+                    }
                 }
+                Ok(None) => debug!("None returned"),
+                Err(e) => debug!("{:?}", e),
             }
+        }
 
-            let component_registration = self
-                .registration_by_uuid
-                .get(&server_component_changes.component_id())
-                .expect("Component should be registered.");
+        if to_resimmulate.len() != 0 {
+            let to_resimulate = self
+                .client_buffer
+                .iter_history(self.current_command_frame - self.update.command_frame)
+                .filter(|val| to_resimmulate.contains(&val.entity_id))
+                .map(|val| val.clone())
+                .collect::<Vec<ClientCommandBufferEntry<C>>>();
 
-            component_registration.apply_changes(
-                self.world,
-                *entity,
-                server_component_changes.data(),
+            self.resimmulation_buffer.push(
+                self.update.command_frame,
+                self.current_command_frame,
+                to_resimulate,
             );
-            //            component_registration.apply_changes(self.world, *entity, client_component_changes.data());
         }
     }
 }

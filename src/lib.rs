@@ -25,7 +25,7 @@ pub mod tracking {
     pub use legion::storage::ComponentTypeId;
 
     pub use legion_sync_macro::sync;
-    pub use track::{preclude::*, *};
+    pub use net_sync::{*, preclude::*};
 }
 
 pub fn create_copy_clone_impl() -> clone_merge::CopyCloneImpl {

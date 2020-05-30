@@ -7,25 +7,19 @@ use legion::{
     systems::{SubWorld, SystemBuilder},
     world::World,
 };
-use log::error;
 use serde::{
+    Deserialize,
     export::{
         fmt::{Debug, Error},
         Formatter,
-    },
-    Deserialize, Serialize,
+    }, Serialize,
 };
 
 use net_sync::{
+    preclude::serde_diff::{Config, Diff, FieldPathMode, SerdeDiff},
     uid::{Uid, UidAllocator},
-    ComponentId,
 };
-use track::{error::ErrorKind, serialization::SerializationStrategy, Apply, ModificationEvent};
-
-use crate::{
-    components::UidComponent,
-    tracking::serde_diff::{Config, Diff, FieldPathMode, SerdeDiff},
-};
+use net_sync::{apply::Apply, error::ErrorKind, serialization::SerializationStrategy};
 
 inventory::collect!(ComponentRegistration);
 
@@ -45,27 +39,23 @@ pub struct ComponentRegistration {
     pub(crate) exists_in_world: fn(world: &World, entity: Entity) -> bool,
     pub(crate) exists_in_subworld: fn(world: &SubWorld, entity: Entity) -> bool,
 
-    pub(crate) serialize_if_changed: Arc<
-        dyn Fn(
-                &legion::world::World,
-                legion::entity::Entity,
-                &legion::world::World,
-                legion::entity::Entity,
-                &crate::tracking::Sender<ModificationEvent<ComponentId>>,
-            ) + Send
-            + Sync,
-    >,
-
     pub(crate) serialize_if_exists_in_world: Arc<
         dyn Fn(&World, legion::entity::Entity) -> Result<Option<Vec<u8>>, ErrorKind> + Send + Sync,
     >,
     pub(crate) serialize_if_exists_in_subworld: Arc<
         dyn Fn(&SubWorld, legion::entity::Entity) -> Result<Option<Vec<u8>>, ErrorKind>
-            + Send
-            + Sync,
+        + Send
+        + Sync,
+    >,
+    pub(crate) serialize_difference:
+    Arc<dyn Fn(&Vec<u8>, &Vec<u8>) -> Result<Option<Vec<u8>>, ErrorKind> + Send + Sync>,
+    pub(crate) serialize_difference_with_current: Arc<
+        dyn Fn(&World, legion::entity::Entity, &Vec<u8>) -> Result<Option<Vec<u8>>, ErrorKind>
+        + Send
+        + Sync,
     >,
     pub(crate) deserialize:
-        Arc<dyn Fn(&CommandBuffer, legion::entity::Entity, &[u8]) + Send + Sync>,
+    Arc<dyn Fn(&CommandBuffer, legion::entity::Entity, &[u8]) + Send + Sync>,
 
     pub(crate) grand_write_access: fn(SystemBuilder) -> SystemBuilder,
     pub(crate) grand_read_access: fn(SystemBuilder) -> SystemBuilder,
@@ -107,17 +97,6 @@ impl ComponentRegistration {
         (&*self.deserialize)(command_buffer, entity, data)
     }
 
-    pub fn serialize_if_changed(
-        &self,
-        src_world: &legion::world::World,
-        src_entity: legion::entity::Entity,
-        dst_world: &legion::world::World,
-        dst_entity: legion::entity::Entity,
-        notifier: &crate::tracking::Sender<ModificationEvent<ComponentId>>,
-    ) {
-        (&*self.serialize_if_changed)(src_world, src_entity, dst_world, dst_entity, notifier)
-    }
-
     pub fn exists_in_subworld(&self, world: &SubWorld, entity: legion::entity::Entity) -> bool {
         (&self.exists_in_subworld)(world, entity)
     }
@@ -140,6 +119,23 @@ impl ComponentRegistration {
         entity: legion::entity::Entity,
     ) -> Result<Option<Vec<u8>>, ErrorKind> {
         (&*self.serialize_if_exists_in_subworld)(world, entity)
+    }
+
+    pub fn serialize_difference(
+        &self,
+        unchanged: &Vec<u8>,
+        changed: &Vec<u8>,
+    ) -> Result<Option<Vec<u8>>, ErrorKind> {
+        (&*self.serialize_difference)(unchanged, changed)
+    }
+
+    pub fn serialize_difference_with_current(
+        &self,
+        world: &World,
+        entity: legion::entity::Entity,
+        unchanged: &Vec<u8>,
+    ) -> Result<Option<Vec<u8>>, ErrorKind> {
+        (&*self.serialize_difference_with_current)(world, entity, unchanged)
     }
 
     pub fn grand_read_access(&self, system_builder: SystemBuilder) -> SystemBuilder {
@@ -168,14 +164,14 @@ impl ComponentRegistration {
 
     pub fn of<
         T: Clone
-            + Debug
-            + Serialize
-            + for<'de> Deserialize<'de>
-            + Send
-            + Sync
-            + SerdeDiff
-            + Default
-            + 'static,
+        + Debug
+        + Serialize
+        + for<'de> Deserialize<'de>
+        + Send
+        + Sync
+        + SerdeDiff
+        + Default
+        + 'static,
         S: SerializationStrategy + 'static + Clone,
     >(
         serialisation: S,
@@ -194,6 +190,7 @@ impl ComponentRegistration {
         let serialize2 = serialisation.clone();
         let serialize3 = serialisation.clone();
         let serialize4 = serialisation.clone();
+        let serialize5 = serialisation.clone();
         let deserialize1 = serialisation.clone();
         let deserialize2 = serialisation.clone();
 
@@ -209,37 +206,6 @@ impl ComponentRegistration {
                     std::ptr::write(dst_ptr, <T as Clone>::clone(&*src_ptr));
                 }
             },
-            serialize_if_changed: Arc::new(
-                move |src_world, src_entity, dst_world, dst_entity, notifier| {
-                    let src_comp = src_world.get_component::<T>(src_entity);
-                    let dst_comp = dst_world.get_component::<T>(dst_entity);
-
-                    if let (Some(src_comp), Some(dst_comp)) = (src_comp, dst_comp) {
-                        let diff = Config::new()
-                            .with_field_path_mode(FieldPathMode::Index)
-                            .serializable_diff(&*src_comp, &*dst_comp);
-
-                        match serialize3.serialize::<Diff<T>>(&diff) {
-                            Ok(data) => {
-                                if diff.has_changes() {
-                                    let identifier = src_world
-                                        .get_component::<UidComponent>(src_entity)
-                                        .expect("Serializing difference, uid should exit.");
-                                    notifier
-                                    .send(ModificationEvent::new(data, identifier.uid(), TypeId::of::<T>()))
-                                    .expect("The sender for modification events panicked. Is the receiver still alive?");
-                                }
-                            }
-                            Err(e) => {
-                                error!(
-                                    "Could not serialize modification information because: {:?}",
-                                    e
-                                );
-                            }
-                        };
-                    }
-                },
-            ),
             exists_in_subworld: |world, entity| -> bool {
                 // TODO: World supports a check if an component is in an entity.
                 // Maybe we should open A PR for allowing this via the system world as well.
@@ -266,6 +232,64 @@ impl ComponentRegistration {
                     Ok(None)
                 },
             ),
+            serialize_difference: Arc::new(
+                move |unchanged, changed| -> Result<Option<Vec<u8>>, ErrorKind> {
+                    let unchanged = serialize5
+                        .deserialize::<T>(unchanged)
+                        .expect("failed to deserialize unchanged component");
+
+                    let changed = serialize5
+                        .deserialize::<T>(changed)
+                        .expect("failed to deserialize changed component");
+
+                    let diff = Config::new()
+                        .with_field_path_mode(FieldPathMode::Index)
+                        .serializable_diff(&unchanged, &changed);
+
+                    match serialize5.serialize::<Diff<T>>(&diff) {
+                        Ok(data) => {
+                            if diff.has_changes() {
+                                return Ok(Some(data));
+                            }
+                        }
+                        Err(e) => {
+                            panic!(
+                                "Could not serialize modification information because: {:?}",
+                                e
+                            );
+                        }
+                    }
+                    Ok(None)
+                },
+            ),
+            serialize_difference_with_current: Arc::new(
+                move |world, entity, unchanged| -> Result<Option<Vec<u8>>, ErrorKind> {
+                    let unchanged = serialize3
+                        .deserialize::<T>(unchanged)
+                        .expect("failed to deserialize component");
+
+                    if let Some(latest) = world.get_component::<T>(entity) {
+                        let diff = Config::new()
+                            .with_field_path_mode(FieldPathMode::Index)
+                            .serializable_diff(&unchanged, &latest);
+
+                        match serialize3.serialize::<Diff<T>>(&diff) {
+                            Ok(data) => {
+                                if diff.has_changes() {
+                                    return Ok(Some(data));
+                                }
+                            }
+                            Err(e) => {
+                                panic!(
+                                    "Could not serialize modification information because: {:?}",
+                                    e
+                                );
+                            }
+                        };
+                    }
+                    Ok(None)
+                },
+            ),
             deserialize: Arc::new(move |command_buffer, entity, data| {
                 // TODO propagate error
                 let comp = deserialize1
@@ -280,10 +304,14 @@ impl ComponentRegistration {
                 let component = deserialize2
                     .deserialize::<T>(data)
                     .expect("Failed to deserialize component.");
-                world.add_component::<T>(entity, component);
+                world
+                    .add_component::<T>(entity, component)
+                    .expect("Can not add component to world.");
             }),
             remove_component: |world, entity| {
-                world.remove_component::<T>(entity).expect("Can not remove component from world.");
+                world
+                    .remove_component::<T>(entity)
+                    .expect("Can not remove component from world.");
             },
             apply_changes: Arc::new(move |world, entity, data| {
                 let mut component = world
@@ -321,7 +349,7 @@ impl ComponentRegister {
         registered_components
     }
 
-    pub fn iter(&self) -> impl Iterator<Item = ComponentRegistrationRef> {
+    pub fn iter(&self) -> impl Iterator<Item=ComponentRegistrationRef> {
         inventory::iter::<ComponentRegistration>.into_iter()
     }
 }
@@ -345,26 +373,26 @@ pub mod test {
     use crate::{
         components::UidComponent,
         register::{ComponentRegister, ComponentRegistration, ComponentRegistrationRef},
-        tracking::{serde_diff, Bincode, SerdeDiff},
+        tracking::{Bincode, serde_diff, SerdeDiff},
     };
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, SerdeDiff)]
     struct Component {}
 
-    crate::register_component_type!(Component, Bincode);
+    crate ::register_component_type!(Component, Bincode);
 
     #[test]
     fn registered_by_component_id_should_be_filled_test() {
         let registered = ComponentRegister::by_component_id();
 
-        assert_eq!(registered.len(), 3);
+        assert_eq!(registered.len(), 2);
     }
 
     #[test]
     fn registered_by_uid_should_be_filled_test() {
         let registered = ComponentRegister::by_unique_uid();
 
-        assert_eq!(registered.len(), 3);
+        assert_eq!(registered.len(), 2);
     }
 
     #[test]
@@ -373,7 +401,6 @@ pub mod test {
 
         assert!(registered.get(&1).is_some());
         assert!(registered.get(&2).is_some());
-        assert!(registered.get(&3).is_some());
     }
 
     #[test]
