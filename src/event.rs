@@ -1,5 +1,4 @@
-use std::collections::HashMap;
-use std::fmt::Debug;
+use std::{collections::HashMap, fmt::Debug};
 
 use legion::prelude::Entity;
 use serde::export::{fmt::Error, Formatter};

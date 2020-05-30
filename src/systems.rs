@@ -1,13 +1,15 @@
 //! A number of systems that can be used to synchronize and trace components.
 
-use legion::prelude::SystemBuilder;
-use legion::systems::schedule::Builder;
+use legion::{prelude::SystemBuilder, systems::schedule::Builder};
 
 use net_sync::compression::CompressionStrategy;
-
-use crate::{resources::RegisteredComponentsResource, systems::tcp::tcp_client_receive_system};
-use crate::{systems::tcp::tcp_client_sent_system, tracking::SerializationStrategy};
 use net_sync::transport::{NetworkCommand, NetworkMessage};
+
+use crate::{
+    resources::RegisteredComponentsResource,
+    systems::tcp::{tcp_client_receive_system, tcp_client_sent_system},
+    tracking::SerializationStrategy,
+};
 
 pub mod tcp;
 
@@ -52,9 +54,25 @@ impl BuilderExt for Builder {
     >(
         self,
     ) -> Builder {
-        self.add_system(tcp::tcp_connection_listener::<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>())
-            .add_system(tcp::tcp_server_receive_system::<S, C, ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>())
-            .add_system(tcp::tcp_server_sent_system::<S, C, ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>())
+        self.add_system(tcp::tcp_connection_listener::<
+            ServerToClientMessage,
+            ClientToServerMessage,
+            ClientToServerCommand,
+        >())
+            .add_system(tcp::tcp_server_receive_system::<
+                S,
+                C,
+                ServerToClientMessage,
+                ClientToServerMessage,
+                ClientToServerCommand,
+            >())
+            .add_system(tcp::tcp_server_sent_system::<
+                S,
+                C,
+                ServerToClientMessage,
+                ClientToServerMessage,
+                ClientToServerCommand,
+            >())
     }
 
     fn add_tcp_client_systems<
@@ -63,12 +81,23 @@ impl BuilderExt for Builder {
         ServerToClientMessage: NetworkMessage,
         ClientToServerMessage: NetworkMessage,
         ClientToServerCommand: NetworkCommand,
-
     >(
         self,
     ) -> Builder {
-        self.add_system(tcp_client_sent_system::<S, C, ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>())
-            .add_system(tcp_client_receive_system::<S, C, ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>())
+        self.add_system(tcp_client_sent_system::<
+            S,
+            C,
+            ServerToClientMessage,
+            ClientToServerMessage,
+            ClientToServerCommand,
+        >())
+            .add_system(tcp_client_receive_system::<
+                S,
+                C,
+                ServerToClientMessage,
+                ClientToServerMessage,
+                ClientToServerCommand,
+            >())
     }
 }
 

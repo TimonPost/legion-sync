@@ -13,8 +13,8 @@ readme = "README.md"
 
 [dependencies]
 net-sync = { version = "0.0.1", path = "../net-sync" }
-track = { version = "0.1.0", path = "../track" }
 legion-sync-macro = {path = "../legion-sync-macro" }
+itertools = "0.9.0"
 
 legion = { version = "0.2.1", branch = "clone_move_rebased", path = "../../legion", default-features=false}
 serde = "1.0.104"
