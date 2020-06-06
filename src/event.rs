@@ -1,12 +1,10 @@
 use std::{collections::HashMap, fmt::Debug};
 
+use crossbeam_channel::Receiver;
 use legion::prelude::Entity;
 use serde::export::{fmt::Error, Formatter};
 
-use crate::{
-    resources::RegisteredComponentsResource, tracking::re_exports::crossbeam_channel::Receiver,
-    WorldAbstraction,
-};
+use crate::{resources::RegisteredComponentsResource, world::WorldAbstraction};
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub enum LegionEvent {

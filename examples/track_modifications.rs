@@ -31,8 +31,8 @@
 // }
 //
 // fn main() {
-//     let universe = Universe::new();
-//     let mut world = universe.create_world();
+//     let world = Universe::new();
+//     let mut world = world.create_world();
 //
 //     let mut resources = Resources::default();
 //     resources.insert(PostOfficeResource::new());

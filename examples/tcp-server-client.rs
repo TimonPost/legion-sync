@@ -57,8 +57,8 @@
 // /// Start and initialize the legion server logic.
 // fn start_server() {
 //     thread::spawn(|| {
-//         let universe = Universe::new();
-//         let mut world = universe.create_world();
+//         let world = Universe::new();
+//         let mut world = world.create_world();
 //
 //         // Create TCP listener on port local host port 1999.
 //         let listener = TcpListener::bind("127.0.0.1:1119".parse::<SocketAddr>().unwrap()).unwrap();
@@ -82,8 +82,8 @@
 // /// Start and initialize the legion client logic.
 // fn start_client() -> JoinHandle<()> {
 //     thread::spawn(|| {
-//         let universe = Universe::new();
-//         let mut world = universe.create_world();
+//         let world = Universe::new();
+//         let mut world = world.create_world();
 //
 //         let tcp_client = TcpClientResource::new("127.0.0.1:1119".parse().unwrap()).unwrap();
 //

@@ -80,15 +80,15 @@ impl RegisteredComponentsResource {
 }
 
 pub struct HashmapRegistry<'a, I>
-    where
-        I: Eq + Hash,
+where
+    I: Eq + Hash,
 {
     lock: MutexGuard<'a, HashMap<I, ComponentRegistrationRef>>,
 }
 
 impl<'a, I> HashmapRegistry<'a, I>
-    where
-        I: Eq + Hash,
+where
+    I: Eq + Hash,
 {
     pub fn new(
         guard: MutexGuard<'a, HashMap<I, ComponentRegistrationRef>>,

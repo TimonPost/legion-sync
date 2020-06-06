@@ -1,5 +1,4 @@
-use std::marker::PhantomData;
-use std::net::SocketAddr;
+use std::{marker::PhantomData, net::SocketAddr};
 
 use itertools::Itertools;
 use legion::{
@@ -10,16 +9,15 @@ use legion::{
 use log::debug;
 
 use net_sync::{
-    ComponentData,
-    compression::{CompressionStrategy, lz4::Lz4},
-    serialization::bincode::Bincode,
-    state::{ComponentChanged, WorldState},
+    compression::{lz4::Lz4, CompressionStrategy},
+    serialization::{bincode::Bincode, SerializationStrategy},
     synchronisation::{
         ClientCommandBuffer, ClientCommandBufferEntry, CommandFrame, CommandFrameTicker,
-        ResimulationBuffer,
+        ComponentChanged, ComponentData, NetworkCommand, NetworkMessage, ResimulationBuffer,
+        WorldState,
     },
     transport,
-    transport::{NetworkCommand, NetworkMessage, PostBox},
+    transport::PostBox,
     uid::UidAllocator,
 };
 
@@ -27,8 +25,7 @@ use crate::{
     filters::filter_fns::registered,
     resources::{EventResource, RegisteredComponentsResource, ResourcesExt},
     systems::BuilderExt,
-    tracking::SerializationStrategy,
-    universe::{network::WorldInstance, UniverseBuilder},
+    world::{world_instance::WorldInstance, WorldBuilder},
 };
 
 pub struct ClientWorldBuilder<
@@ -45,11 +42,11 @@ pub struct ClientWorldBuilder<
 }
 
 impl<
-    ServerToClientMessage: NetworkMessage,
-    ClientToServerMessage: NetworkMessage,
-    ClientToServerCommand: NetworkCommand,
-> Default
-for ClientWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+        ServerToClientMessage: NetworkMessage,
+        ClientToServerMessage: NetworkMessage,
+        ClientToServerCommand: NetworkCommand,
+    > Default
+    for ClientWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
 {
     fn default() -> Self {
         ClientWorldBuilder {
@@ -60,20 +57,20 @@ for ClientWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToSer
             ctsm: PhantomData,
             ctsc: PhantomData,
         }
-            .default_resources::<Bincode, Lz4>()
-            .default_systems()
+        .default_resources::<Bincode, Lz4>()
+        .default_systems()
     }
 }
 
 impl<
-    ServerToClientMessage: NetworkMessage,
-    ClientToServerMessage: NetworkMessage,
-    ClientToServerCommand: NetworkCommand,
-> UniverseBuilder
-for ClientWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+        ServerToClientMessage: NetworkMessage,
+        ClientToServerMessage: NetworkMessage,
+        ClientToServerCommand: NetworkCommand,
+    > WorldBuilder
+    for ClientWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
 {
     type BuildResult =
-    ClientWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>;
+        ClientWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>;
 
     fn default_resources<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
         self,
@@ -117,10 +114,10 @@ for ClientWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToSer
 }
 
 impl<
-    ServerToClientMessage: NetworkMessage,
-    ClientToServerMessage: NetworkMessage,
-    ClientToServerCommand: NetworkCommand,
-> ClientWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+        ServerToClientMessage: NetworkMessage,
+        ClientToServerMessage: NetworkMessage,
+        ClientToServerCommand: NetworkCommand,
+    > ClientWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
 {
     pub fn with_tcp<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
         mut self,
@@ -148,10 +145,10 @@ pub struct ClientWorld<
 }
 
 impl<
-    ServerToClientMessage: NetworkMessage,
-    ClientToServerMessage: NetworkMessage,
-    ClientToServerCommand: NetworkCommand,
-> ClientWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+        ServerToClientMessage: NetworkMessage,
+        ClientToServerMessage: NetworkMessage,
+        ClientToServerCommand: NetworkCommand,
+    > ClientWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
 {
     pub fn new(
         resources: Resources,

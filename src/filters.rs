@@ -6,7 +6,9 @@ use legion::{
     storage::{ComponentResourceSet, ComponentStorage, ComponentTypeId},
 };
 
-use crate::{components::UidComponent, tracking::tracker::TrackResource};
+use net_sync::tracker::TrackResource;
+
+use crate::components::UidComponent;
 
 pub mod filter_fns {
     use std::collections::HashSet;
@@ -245,13 +247,13 @@ pub mod test {
         prelude::{IntoQuery, Read, Universe, World},
     };
 
-    use net_sync::track::TrackResource;
+    use net_sync::tracker::TrackResource;
 
     use crate::{
         components::UidComponent,
         filters::{
-            AllFilter,
-            filter_fns::{all, modified, removed}, ModifiedFilter, RegisteredComponentFilter, RemovedFilter,
+            filter_fns::{all, modified, removed},
+            AllFilter, ModifiedFilter, RegisteredComponentFilter, RemovedFilter,
             TrackResourceFilter,
         },
         tracking::ComponentTypeId,
@@ -384,9 +386,9 @@ pub mod test {
 
         let (_, mut world) = get_world();
 
-        world.insert((), vec![(A, )]);
-        world.insert((), vec![(B, )]);
-        world.insert((), vec![(C, )]);
+        world.insert((), vec![(A,)]);
+        world.insert((), vec![(B,)]);
+        world.insert((), vec![(C,)]);
 
         let mut registered = HashSet::new();
         registered.insert(ComponentTypeId::of::<A>());
@@ -423,7 +425,7 @@ pub mod test {
     fn should_receive_events_test() {
         struct A;
 
-        let (tx, rx) = crate::tracking::re_exports::crossbeam_channel::unbounded::<Event>();
+        let (tx, rx) = crossbeam_channel::unbounded::<Event>();
         let (_universe, mut world) = get_world();
 
         let mut registered = HashSet::new();
@@ -433,11 +435,11 @@ pub mod test {
 
         world.subscribe(tx, filter);
 
-        let entities1 = world.insert((), vec![(A, )]).to_owned();
+        let entities1 = world.insert((), vec![(A,)]).to_owned();
         world.delete(entities1[0]);
-        let entities2 = world.insert((), vec![(A, )]).to_owned();
+        let entities2 = world.insert((), vec![(A,)]).to_owned();
         world.delete(entities2[0]);
-        let entities3 = world.insert((), vec![(A, )]).to_owned();
+        let entities3 = world.insert((), vec![(A,)]).to_owned();
         world.delete(entities3[0]);
 
         let events = rx.try_iter().collect::<Vec<Event>>();
@@ -471,7 +473,7 @@ pub mod test {
         let universe = Universe::new();
         let mut world = universe.create_world();
 
-        world.insert((), vec![(UidComponent::new(1), )]);
+        world.insert((), vec![(UidComponent::new(1),)]);
 
         (universe, world)
     }

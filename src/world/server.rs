@@ -8,12 +8,14 @@ use log::debug;
 use serde::export::PhantomData;
 
 use net_sync::{
-    ComponentData,
-    compression::{CompressionStrategy, lz4::Lz4},
-    state::WorldState,
-    synchronisation::{CommandFrameTicker, ModifiedComponentsBuffer},
+    compression::{lz4::Lz4, CompressionStrategy},
+    serialization::{bincode::Bincode, SerializationStrategy},
+    synchronisation::{
+        CommandFrameTicker, ComponentData, ModifiedComponentsBuffer, NetworkCommand,
+        NetworkMessage, WorldState,
+    },
     transport,
-    transport::{NetworkCommand, NetworkMessage, PostOffice},
+    transport::PostOffice,
     uid::UidAllocator,
 };
 
@@ -21,8 +23,7 @@ use crate::{
     event::{LegionEvent, LegionEventHandler},
     resources::{EventResource, RegisteredComponentsResource, ResourcesExt},
     systems::BuilderExt,
-    tracking::{Bincode, SerializationStrategy},
-    universe::{network::WorldInstance, UniverseBuilder},
+    world::{world_instance::WorldInstance, WorldBuilder},
 };
 
 pub struct ServerConfig {}
@@ -44,11 +45,11 @@ pub struct ServerWorldBuilder<ServerToClientMessage, ClientToServerMessage, Clie
 }
 
 impl<
-    ServerToClientMessage: NetworkMessage,
-    ClientToServerMessage: NetworkMessage,
-    ClientToServerCommand: NetworkCommand,
-> Default
-for ServerWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+        ServerToClientMessage: NetworkMessage,
+        ClientToServerMessage: NetworkMessage,
+        ClientToServerCommand: NetworkCommand,
+    > Default
+    for ServerWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
 {
     fn default() -> Self {
         ServerWorldBuilder {
@@ -60,20 +61,20 @@ for ServerWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToSer
             ctsm: PhantomData,
             ctsc: PhantomData,
         }
-            .default_systems()
-            .default_resources::<Bincode, Lz4>()
+        .default_systems()
+        .default_resources::<Bincode, Lz4>()
     }
 }
 
 impl<
-    ServerToClientMessage: NetworkMessage,
-    ClientToServerMessage: NetworkMessage,
-    ClientToServerCommand: NetworkCommand,
-> UniverseBuilder
-for ServerWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+        ServerToClientMessage: NetworkMessage,
+        ClientToServerMessage: NetworkMessage,
+        ClientToServerCommand: NetworkCommand,
+    > WorldBuilder
+    for ServerWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
 {
     type BuildResult =
-    ServerWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>;
+        ServerWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>;
 
     fn default_resources<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
         self,
@@ -118,10 +119,10 @@ for ServerWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToSer
 }
 
 impl<
-    ServerToClientMessage: NetworkMessage,
-    ClientToServerMessage: NetworkMessage,
-    ClientToServerCommand: NetworkCommand,
-> ServerWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+        ServerToClientMessage: NetworkMessage,
+        ClientToServerMessage: NetworkMessage,
+        ClientToServerCommand: NetworkCommand,
+    > ServerWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
 {
     pub fn with_tcp<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
         mut self,
@@ -157,10 +158,10 @@ pub struct ServerWorld<
 }
 
 impl<
-    ServerToClientMessage: NetworkMessage,
-    ClientToServerMessage: NetworkMessage,
-    ClientToServerCommand: NetworkCommand,
-> ServerWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+        ServerToClientMessage: NetworkMessage,
+        ClientToServerMessage: NetworkMessage,
+        ClientToServerCommand: NetworkCommand,
+    > ServerWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
 {
     pub fn new(
         resources: Resources,
@@ -265,9 +266,9 @@ fn handle_world_events(
                 world_state.remove_entity(identifier);
 
                 // TODO?
-                //                let identifier = allocator
-                //                    .deallocate(to_remove)
-                //                    .expect("Entity should be allocated.");
+                // let identifier = allocator
+                //     .deallocate(to_remove)
+                //     .expect("Entity should be allocated.");
             }
             LegionEvent::EntityInserted(entity, _component_count) => {
                 let identifier = allocator.get(&entity);

@@ -8,23 +8,25 @@ use legion::{
     world::World,
 };
 use serde::{
-    Deserialize,
     export::{
         fmt::{Debug, Error},
         Formatter,
-    }, Serialize,
+    },
+    Deserialize, Serialize,
 };
 
 use net_sync::{
-    preclude::serde_diff::{Config, Diff, FieldPathMode, SerdeDiff},
+    apply::Apply,
+    error::ErrorKind,
+    serialization::SerializationStrategy,
+    track_attr::serde_diff::{Config, Diff, FieldPathMode, SerdeDiff},
     uid::{Uid, UidAllocator},
 };
-use net_sync::{apply::Apply, error::ErrorKind, serialization::SerializationStrategy};
 
 inventory::collect!(ComponentRegistration);
 
 pub type ComponentRegistrationRef = &'static ComponentRegistration;
-pub type HashmapRegistery = HashMap<ComponentTypeId, ComponentRegistrationRef>;
+pub type HashmapRegistry = HashMap<ComponentTypeId, ComponentRegistrationRef>;
 
 #[derive(Clone)]
 pub struct ComponentRegistration {
@@ -44,18 +46,18 @@ pub struct ComponentRegistration {
     >,
     pub(crate) serialize_if_exists_in_subworld: Arc<
         dyn Fn(&SubWorld, legion::entity::Entity) -> Result<Option<Vec<u8>>, ErrorKind>
-        + Send
-        + Sync,
+            + Send
+            + Sync,
     >,
     pub(crate) serialize_difference:
-    Arc<dyn Fn(&Vec<u8>, &Vec<u8>) -> Result<Option<Vec<u8>>, ErrorKind> + Send + Sync>,
+        Arc<dyn Fn(&Vec<u8>, &Vec<u8>) -> Result<Option<Vec<u8>>, ErrorKind> + Send + Sync>,
     pub(crate) serialize_difference_with_current: Arc<
         dyn Fn(&World, legion::entity::Entity, &Vec<u8>) -> Result<Option<Vec<u8>>, ErrorKind>
-        + Send
-        + Sync,
+            + Send
+            + Sync,
     >,
     pub(crate) deserialize:
-    Arc<dyn Fn(&CommandBuffer, legion::entity::Entity, &[u8]) + Send + Sync>,
+        Arc<dyn Fn(&CommandBuffer, legion::entity::Entity, &[u8]) + Send + Sync>,
 
     pub(crate) grand_write_access: fn(SystemBuilder) -> SystemBuilder,
     pub(crate) grand_read_access: fn(SystemBuilder) -> SystemBuilder,
@@ -164,14 +166,14 @@ impl ComponentRegistration {
 
     pub fn of<
         T: Clone
-        + Debug
-        + Serialize
-        + for<'de> Deserialize<'de>
-        + Send
-        + Sync
-        + SerdeDiff
-        + Default
-        + 'static,
+            + Debug
+            + Serialize
+            + for<'de> Deserialize<'de>
+            + Send
+            + Sync
+            + SerdeDiff
+            + Default
+            + 'static,
         S: SerializationStrategy + 'static + Clone,
     >(
         serialisation: S,
@@ -349,7 +351,7 @@ impl ComponentRegister {
         registered_components
     }
 
-    pub fn iter(&self) -> impl Iterator<Item=ComponentRegistrationRef> {
+    pub fn iter(&self) -> impl Iterator<Item = ComponentRegistrationRef> {
         inventory::iter::<ComponentRegistration>.into_iter()
     }
 }
@@ -368,18 +370,17 @@ pub mod test {
     use std::any::TypeId;
 
     use legion::storage::{ComponentMeta, ComponentTypeId};
-    use serde::{Deserialize, Serialize};
 
     use crate::{
         components::UidComponent,
         register::{ComponentRegister, ComponentRegistration, ComponentRegistrationRef},
-        tracking::{Bincode, serde_diff, SerdeDiff},
+        tracking::{re_exports::serde_diff::*, track_attr::*},
     };
 
     #[derive(Clone, Default, Debug, Serialize, Deserialize, SerdeDiff)]
     struct Component {}
 
-    crate ::register_component_type!(Component, Bincode);
+    crate::register_component_type!(Component, Bincode);
 
     #[test]
     fn registered_by_component_id_should_be_filled_test() {

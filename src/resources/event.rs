@@ -1,3 +1,4 @@
+use crossbeam_channel::{unbounded, Receiver, Sender, TryIter};
 use legion::{
     filter::{
         ArchetypeFilterData, ChunkFilterData, ChunksetFilterData, EntityFilter, EntityFilterTuple,
@@ -5,8 +6,6 @@ use legion::{
     },
     prelude::{Event, World},
 };
-
-use net_sync::re_exports::crossbeam_channel::{Receiver, Sender, TryIter, unbounded};
 
 pub struct EventResource {
     pub(crate) legion_events_tx: Sender<Event>,
@@ -18,10 +17,10 @@ impl EventResource {
         world: &mut World,
         event_filter: EntityFilterTuple<A, B, C>,
     ) -> EventResource
-        where
-            A: for<'a> Filter<ArchetypeFilterData<'a>> + Clone + 'static,
-            B: for<'a> Filter<ChunksetFilterData<'a>> + Clone + 'static,
-            C: for<'a> Filter<ChunkFilterData<'a>> + Clone + 'static,
+    where
+        A: for<'a> Filter<ArchetypeFilterData<'a>> + Clone + 'static,
+        B: for<'a> Filter<ChunksetFilterData<'a>> + Clone + 'static,
+        C: for<'a> Filter<ChunkFilterData<'a>> + Clone + 'static,
     {
         let (tx, rx) = unbounded();
 

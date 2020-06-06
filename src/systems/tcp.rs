@@ -10,13 +10,13 @@ use net_sync::{
     compression::CompressionStrategy,
     packer::Packer,
     serialization::SerializationStrategy,
+    synchronisation::{CommandFrameTicker, NetworkCommand, NetworkMessage},
     transport,
     transport::{
-        NetworkCommand,
-        NetworkMessage, PostBox, PostOffice, tcp::{TcpClientResource, TcpListenerResource},
+        tcp::{TcpClientResource, TcpListenerResource},
+        PostBox, PostOffice,
     },
 };
-use net_sync::synchronisation::CommandFrameTicker;
 
 use crate::resources::BufferResource;
 

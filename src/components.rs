@@ -4,11 +4,13 @@ use std::ops::{Deref, DerefMut};
 
 use serde::{Deserialize, Serialize};
 
-use net_sync::preclude::{
-    Bincode,
-    serde_diff::{self, *},
+use net_sync::{
+    track_attr::{
+        serde_diff::{self, *},
+        Bincode,
+    },
+    uid::Uid,
 };
-use net_sync::uid::Uid;
 
 /// A component with a random `UUID`.
 ///
@@ -50,4 +52,4 @@ impl Default for UidComponent {
     }
 }
 
-crate ::register_component_type!(UidComponent, Bincode);
+crate::register_component_type!(UidComponent, Bincode);

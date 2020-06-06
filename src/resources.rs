@@ -7,19 +7,18 @@ use legion::prelude::{Entity, Resources};
 use net_sync::{
     compression::CompressionStrategy,
     packer::Packer,
+    serialization::SerializationStrategy,
+    synchronisation::{
+        ClientCommandBuffer, CommandFrameTicker, NetworkCommand, NetworkMessage, ResimulationBuffer,
+    },
+    tracker::TrackResource,
     transport,
     transport::{
-        NetworkCommand,
-        NetworkMessage, PostBox, PostOffice, tcp::{TcpClientResource, TcpListenerResource},
+        tcp::{TcpClientResource, TcpListenerResource},
+        PostBox, PostOffice,
     },
     uid::UidAllocator,
 };
-use net_sync::{
-    synchronisation::{ClientCommandBuffer, CommandFrameTicker, ResimulationBuffer},
-    tracker::TrackResource,
-};
-
-use crate::tracking::SerializationStrategy;
 
 pub use self::{
     buffer::BufferResource,
