@@ -177,7 +177,6 @@ impl<
         let mut command_ticker = resources.get_mut::<CommandFrameTicker>().unwrap();
 
         if command_ticker.try_tick() {
-            debug!("Universe Tick");
             let mut postbox = resources
                 .get_mut::<PostBox<
                     transport::ServerToClientMessage<ServerToClientMessage>,
@@ -194,7 +193,6 @@ impl<
                 .get_mut::<ResimulationBuffer<ClientToServerCommand>>()
                 .unwrap();
 
-            debug!("Draining Inbox Tick");
             let inbox = postbox.drain_inbox(|m| match m {
                 transport::ServerToClientMessage::StateUpdate(_) => true,
                 _ => false,
@@ -203,10 +201,16 @@ impl<
             for packet in inbox {
                 match packet {
                     transport::ServerToClientMessage::StateUpdate(update) => {
+                        adjust_simulation_speed(
+                            update.command_frame_offset,
+                            update.command_frame,
+                            &mut command_ticker,
+                        );
+
                         if !self.has_received_first_message {
                             debug!("Initial Status Update");
                             self.has_received_first_message = true;
-                            command_ticker.set_command_frame(update.command_frame + 2);
+                            command_ticker.set_command_frame(update.command_frame - 3);
                         }
 
                         let mut state_updater = StateUpdater::new(
@@ -251,6 +255,48 @@ impl<
     pub fn resources_mut(&mut self) -> &mut Resources {
         &mut self.resources
     }
+}
+
+/// Adjust the simulation speed based on the client offset with the server.
+/// The client offset is calculated by subtracting the `server command frame` from the `client command frame`.
+/// The result indicates the client offset from the server command frame.
+/// In normal situations the client should run a few command frames ahead of the server.
+/// However, the client should run not to far ahead nor to far behind.
+///
+/// In cases the offset is to big either negative or positive we should tune the simulation speed.
+///
+/// If the client command frame is to far ahead of the server command frame slow down the simulation speed.
+/// If the client command frame is behind the server command frame then increase the simulation speed.
+fn adjust_simulation_speed(
+    offset: i32,
+    server_command_frame: CommandFrame,
+    current_command_frame: &mut CommandFrameTicker,
+) {
+    static DEFAULT_LAG: i32 = 200; // TODO: replace with real lag distance from server to client.
+
+    if DEFAULT_LAG == offset {
+        return;
+    }
+
+    let mut speed_factor = 0.;
+
+    if offset < -30 || offset > 30 {
+        speed_factor = 1 as f32;
+        current_command_frame.set_command_frame(server_command_frame + DEFAULT_LAG as u32);
+    } else if offset < -15 {
+        speed_factor = 0.875;
+    } else if offset < 0 {
+        speed_factor = 0.9375;
+    } else if offset > 15 {
+        speed_factor = 1.125;
+    } else if offset > 8 {
+        speed_factor = 1.0625;
+    } else {
+        speed_factor = 1 as f32;
+    }
+
+    let new_rate = current_command_frame.default_simulation_speed() as f32 * speed_factor;
+    current_command_frame.adjust_simulation(new_rate);
 }
 
 struct StateUpdater<'a, C: NetworkCommand> {

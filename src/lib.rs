@@ -17,5 +17,5 @@ pub mod tracking {
     pub use legion::storage::ComponentTypeId;
 
     pub use legion_sync_macro::sync;
-    pub use net_sync::{re_exports, track_attr};
+    pub use net_sync::{re_exports, track_attr::*};
 }

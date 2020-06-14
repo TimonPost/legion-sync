@@ -116,7 +116,7 @@ impl ResourcesExt for Resources {
         self.insert(Packer::<S, C>::default());
         self.insert(UidAllocator::<Entity>::new());
         self.insert(TrackResource::new());
-        self.insert(CommandFrameTicker::new(200.))
+        self.insert(CommandFrameTicker::new(30.))
     }
 
     fn insert_tcp_client_resources<
