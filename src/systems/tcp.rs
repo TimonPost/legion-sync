@@ -19,6 +19,8 @@ use net_sync::{
 };
 
 use crate::resources::BufferResource;
+use net_sync::{event::NetworkEventQueue, synchronisation::CommandFrame};
+use std::{io::ErrorKind, net::Shutdown};
 
 pub fn tcp_connection_listener<
     ServerToClientMessage: NetworkMessage,
@@ -28,36 +30,9 @@ pub fn tcp_connection_listener<
     SystemBuilder::new("tcp_connection_listener")
         .write_resource::<TcpListenerResource>()
         .write_resource::<PostOffice<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>>()
+        .write_resource::<NetworkEventQueue>()
         .build(|_, _, resources, _| {
-            if !resources.0.get().is_some() {
-                return;
-            }
-
-            loop {
-                let (stream, addr) = match resources.0.get().unwrap().accept() {
-                    Ok((stream, addr)) => {
-                        stream
-                            .set_nonblocking(true)
-                            .expect("Setting nonblocking mode");
-                        stream.set_nodelay(true).expect("Setting nodelay");
-
-                        debug!("Incoming TCP connection: {:?}", addr);
-
-                        (stream, addr)
-                    }
-                    Err(ref e) if e.kind() == io::ErrorKind::WouldBlock => {
-                        break;
-                    }
-                    Err(e) => {
-                        error!("Error while handling TCP connection: {:?}", e);
-                        // TODO: handle error
-                        break;
-                    }
-                };
-
-                resources.0.register_stream(addr, stream);
-                resources.1.add_client(addr);
-            }
+            net_sync::transport::tcp::tcp_connection_listener(&mut resources.0, &mut resources.1, &mut resources.2);
         })
 }
 
@@ -68,66 +43,23 @@ pub fn tcp_client_receive_system<
     ClientToServerMessage: NetworkMessage,
     ClientToServerCommand: NetworkCommand,
 >() -> Box<dyn Schedulable> {
-    SystemBuilder::new("tcp_receive_system")
+    SystemBuilder::new("tcp_client_receive_system")
         .write_resource::<TcpClientResource>()
-        .write_resource::<BufferResource>()
         .write_resource::<PostBox<
             transport::ServerToClientMessage<ServerToClientMessage>,
             transport::ClientToServerMessage<ClientToServerMessage, ClientToServerCommand>,
         >>()
+        .write_resource::<BufferResource>()
         .read_resource::<Packer<S, C>>()
+        .write_resource::<NetworkEventQueue>()
         .build(|_, _, resources, _| {
-            let tcp: &mut TcpClientResource = &mut resources.0;
-            let recv_buffer: &mut [u8] = &mut resources.1.recv_buffer;
-            let postbox: &mut PostBox<
-                transport::ServerToClientMessage<ServerToClientMessage>,
-                transport::ClientToServerMessage<ClientToServerMessage, ClientToServerCommand>,
-            > = &mut resources.2;
-            let unpacker: &Packer<S, C> = &resources.3;
-
-            let result = tcp.stream().read(recv_buffer);
-
-            match result {
-                Ok(recv_len) => {
-                    if recv_len < 5 {
-                        return;
-                    }
-
-                    // match unpacker
-                    //     .compression()
-                    //     .decompress(&recv_buffer[..recv_len]) {
-                    //     Ok(decompressed) => {
-                    match unpacker.serialization().deserialize::<Vec<
-                        transport::ServerToClientMessage<ServerToClientMessage>,
-                    >>(&recv_buffer[..recv_len])
-                    {
-                        Ok(deserialized) => {
-                            debug!("Received {} bytes from server.", recv_len);
-                            for packet in deserialized.into_iter() {
-                                postbox.add_to_inbox(packet);
-                            }
-                        }
-                        Err(e) => {
-                            error!(
-                                "Error occurred when deserializing TCP-packet. Reason: {:?}",
-                                e
-                            );
-                        }
-                    }
-                    //     }
-                    //     Err(e) => {
-                    //         error!("Error occurred when decompressing TCP-packet. Reason: {:?}", e);
-                    //     }
-                    // }
-                }
-                Err(e) => {
-                    match e.kind() {
-                        io::ErrorKind::ConnectionReset => {}
-                        io::ErrorKind::WouldBlock => {}
-                        _ => {}
-                    };
-                }
-            }
+            net_sync::transport::tcp::tcp_client_receive_system(
+                &mut resources.0,
+                &mut resources.1,
+                &resources.3,
+                &mut resources.4,
+                &mut resources.2.recv_buffer,
+            )
         })
 }
 
@@ -138,53 +70,21 @@ pub fn tcp_client_sent_system<
     ClientToServerMessage: NetworkMessage,
     ClientToServerCommand: NetworkCommand,
 >() -> Box<dyn Schedulable> {
-    SystemBuilder::new("tcp_sent_system")
+    SystemBuilder::new("tcp_client_sent_system")
         .write_resource::<TcpClientResource>()
         .write_resource::<PostBox<
             transport::ServerToClientMessage<ServerToClientMessage>,
             transport::ClientToServerMessage<ClientToServerMessage, ClientToServerCommand>,
         >>()
         .read_resource::<Packer<S, C>>()
+        .write_resource::<NetworkEventQueue>()
         .build(|_, _, resources, _| {
-            let tcp_client: &mut TcpClientResource = &mut resources.0;
-            let postbox: &mut PostBox<
-                transport::ServerToClientMessage<ServerToClientMessage>,
-                transport::ClientToServerMessage<ClientToServerMessage, ClientToServerCommand>,
-            > = &mut resources.1;
-            let packer = &resources.2;
-
-            if postbox.empty_outgoing() {
-                return;
-            }
-            let packets =
-                postbox.drain_outgoing(|_| true).into_iter().collect::<Vec<
-                    transport::ClientToServerMessage<ClientToServerMessage, ClientToServerCommand>,
-                >>();
-
-            if packets.len() == 0 {
-                return;
-            }
-
-            match &packer.serialization().serialize(&packets) {
-                Ok(serialized) => {
-                    debug!("Sending {} packets to host.", packets.len());
-                    // let compressed = packer.compression().compress(&serialized);
-                    //
-                    // if let Err(e) = tcp_client.sent(&compressed) {
-                    //     error!("Error occurred when sending TCP-packet. Reason: {:?}", e);
-                    // }
-
-                    if let Err(e) = tcp_client.sent(&serialized) {
-                        error!("Error occurred when sending TCP-packet. Reason: {:?}", e);
-                    }
-                }
-                Err(e) => {
-                    error!(
-                        "Error occurred when serializing TCP-packet. Reason: {:?}",
-                        e
-                    );
-                }
-            }
+            net_sync::transport::tcp::tcp_client_sent_system(
+                &mut resources.0,
+                &mut resources.1,
+                &resources.2,
+                &mut resources.3,
+            )
         })
 }
 
@@ -195,92 +95,15 @@ pub fn tcp_server_receive_system<
     ClientToServerMessage: NetworkMessage,
     ClientToServerCommand: NetworkCommand,
 >() -> Box<dyn Schedulable> {
-    SystemBuilder::new("tcp_receive_system")
+    SystemBuilder::new("tcp_server_receive_system")
         .write_resource::<TcpListenerResource>()
         .write_resource::<PostOffice<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>>()
         .read_resource::<Packer<S, C>>()
         .write_resource::<BufferResource>()
-        .write_resource::<CommandFrameTicker>()
+        .write_resource::<NetworkEventQueue>()
+        .read_resource::<CommandFrameTicker>()
         .build(|_, _, resources, _| {
-            let tcp: &mut TcpListenerResource = &mut resources.0;
-            let postoffice: &mut PostOffice<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand> = &mut resources.1;
-            let unpacker: &Packer<S, C> = &resources.2;
-            let recv_buffer: &mut [u8] = &mut resources.3.recv_buffer;
-
-            for (_, (active, stream)) in tcp.iter_mut() {
-                // If we can't get a peer_addr, there is likely something pretty wrong with the
-                // connection so we'll mark it inactive.
-                let peer_addr = match stream.peer_addr() {
-                    Ok(addr) => addr,
-                    Err(_e) => {
-                        *active = false;
-                        continue;
-                    }
-                };
-
-                loop {
-                    let result = stream.read(recv_buffer);
-
-                    match result {
-                        Ok(recv_len) => {
-                            if recv_len < 5 {
-                                *active = false;
-                                break;
-                            }
-
-                            debug!(
-                                "Received {} bytes from TCP stream: {:?}.",
-                                recv_len, peer_addr
-                            );
-
-                            let client = postoffice
-                                .client_by_addr_mut(&peer_addr)
-                                .expect("Client should exist");
-
-                            let buffer = &recv_buffer[..recv_len];
-
-                            // match unpacker
-                            //     .compression()
-                            //     .decompress(buffer) {
-                            //     Ok(decompressed) => {
-                            match unpacker
-                                .serialization()
-                                .deserialize::<Vec<transport::ClientToServerMessage<ClientToServerMessage, ClientToServerCommand>>>(buffer) {
-                                Ok(deserialized) => {
-                                    debug!(
-                                        "Received {:?} packets",
-                                        deserialized.len()
-                                    );
-
-                                    for packet in deserialized.into_iter() {
-                                        client
-                                            .add_received_message(packet, resources.4.command_frame())
-                                    }
-                                }
-                                Err(e) => {
-                                    error!("Error occurred when deserializing TCP-packet. Reason: {:?}", e);
-                                }
-                                // };
-                                //     }
-                                //     Err(e) => {
-                                //         error!("Error occurred when decompressing TCP-packet. Reason: {:?}", e);
-                                //     }
-                            }
-                        }
-                        Err(e) => {
-                            match e.kind() {
-                                io::ErrorKind::ConnectionReset => {
-                                    *active = false;
-                                }
-                                io::ErrorKind::WouldBlock => {}
-                                _ => {}
-                            };
-
-                            break;
-                        }
-                    };
-                }
-            }
+            net_sync::transport::tcp::tcp_server_receive_system(&mut resources.0, &mut resources.1, &resources.2, resources.5.command_frame(), &mut resources.4, &mut resources.3.recv_buffer)
         })
 }
 
@@ -291,56 +114,12 @@ pub fn tcp_server_sent_system<
     ClientToServerMessage: NetworkMessage,
     ClientToServerCommand: NetworkCommand,
 >() -> Box<dyn Schedulable> {
-    SystemBuilder::new("tcp_receive_system")
+    SystemBuilder::new("tcp_server_sent_system")
         .write_resource::<TcpListenerResource>()
         .write_resource::<PostOffice<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>>()
         .write_resource::<Packer<S, C>>()
+        .write_resource::<NetworkEventQueue>()
         .build(|_, _, resources, _| {
-            let tcp: &mut TcpListenerResource = &mut resources.0;
-            let postoffice: &mut PostOffice<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand> = &mut resources.1;
-            let packer: &Packer<S, C> = &resources.2;
-
-            for client in postoffice.clients_mut() {
-                let addr = client.1.addr();
-
-                let postbox = client.1.postbox_mut();
-                let client_stream = tcp
-                    .get_stream(addr)
-                    .expect("TCP didn't exist while it is supposed to.");
-
-                let packets = postbox
-                    .drain_outgoing(|_| true)
-                    .into_iter()
-                    .collect::<Vec<transport::ServerToClientMessage<ServerToClientMessage>>>();
-
-                if packets.len() == 0 {
-                    continue;
-                }
-
-                match &packer.serialization().serialize(&packets) {
-                    Ok(serialized) => {
-                        debug!(
-                            "Sending {} packets to TCP stream.",
-                            packets.len()
-                        );
-
-                        // let compressed = packer.compression().compress(&serialized);
-                        //
-                        // if let Err(e) = client_stream.1.write(&compressed) {
-                        //     error!("Error occurred when sending TCP-packet. Reason: {:?}", e);
-                        // }
-
-                        if let Err(e) = client_stream.1.write(&serialized) {
-                            error!("Error occurred when sending TCP-packet. Reason: {:?}", e);
-                        }
-                    }
-                    Err(e) => {
-                        error!(
-                            "Error occurred when serializing TCP-packet. Reason: {:?}",
-                            e
-                        );
-                    }
-                }
-            }
+            net_sync::transport::tcp::tcp_server_sent_system(&mut resources.0, &mut resources.1, &resources.2, &mut resources.3);
         })
 }

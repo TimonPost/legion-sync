@@ -25,6 +25,7 @@ pub use self::{
     component::{HashmapRegistry, RegisteredComponentsResource},
     event::EventResource,
 };
+use net_sync::event::NetworkEventQueue;
 
 mod buffer;
 mod component;
@@ -116,7 +117,8 @@ impl ResourcesExt for Resources {
         self.insert(Packer::<S, C>::default());
         self.insert(UidAllocator::<Entity>::new());
         self.insert(TrackResource::new());
-        self.insert(CommandFrameTicker::new(30.))
+        self.insert(CommandFrameTicker::new(30.));
+        self.insert(NetworkEventQueue::new())
     }
 
     fn insert_tcp_client_resources<
