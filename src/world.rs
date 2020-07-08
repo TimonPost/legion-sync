@@ -1,17 +1,18 @@
 use legion::systems::{resource::Resource, schedule::Builder};
 
 use crate::register::ComponentRegistration;
-use legion::prelude::{Entity, World};
-use net_sync::{compression::CompressionStrategy, serialization::SerializationStrategy};
+use legion::prelude::{Entity, World, SubWorld};
+use net_sync::{compression::CompressionStrategy};
 
 pub mod client;
 pub mod server;
 pub mod world_instance;
+pub mod serialize;
 
 pub trait WorldBuilder {
     type BuildResult;
 
-    fn default_resources<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
+    fn default_resources<C: CompressionStrategy + 'static>(
         self,
     ) -> Self;
 
@@ -34,7 +35,7 @@ impl WorldAbstraction for World {
     }
 }
 
-impl WorldAbstraction for legion::systems::SubWorld {
+impl<'a> WorldAbstraction for SubWorld<'a> {
     fn has_component(&self, entity: Entity, component: &ComponentRegistration) -> bool {
         component.exists_in_subworld(&self, entity)
     }

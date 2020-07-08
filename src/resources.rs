@@ -6,8 +6,6 @@ use legion::prelude::{Entity, Resources};
 
 use net_sync::{
     compression::CompressionStrategy,
-    packer::Packer,
-    serialization::SerializationStrategy,
     synchronisation::{
         ClientCommandBuffer, CommandFrameTicker, NetworkCommand, NetworkMessage, ResimulationBuffer,
     },
@@ -33,30 +31,25 @@ mod event;
 
 pub trait ResourcesExt {
     fn insert_server_resources<
-        S: SerializationStrategy + 'static,
         C: CompressionStrategy + 'static,
         ServerToClientMessage: NetworkMessage,
         ClientToServerMessage: NetworkMessage,
         ClientToServerCommand: NetworkCommand,
     >(
         &mut self,
-        serialization: S,
         compression: C,
     );
 
     fn insert_client_resources<
-        S: SerializationStrategy + 'static,
         C: CompressionStrategy + 'static,
         ClientToServerCommand: NetworkCommand,
     >(
         &mut self,
-        serialization: S,
         compression: C,
     );
 
-    fn insert_required<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
+    fn insert_required<C: CompressionStrategy + 'static>(
         &mut self,
-        serialization: S,
         compression: C,
     );
 
@@ -73,14 +66,12 @@ pub trait ResourcesExt {
 
 impl ResourcesExt for Resources {
     fn insert_server_resources<
-        S: SerializationStrategy + 'static,
         C: CompressionStrategy + 'static,
         ServerToClientMessage: NetworkMessage,
         ClientToServerMessage: NetworkMessage,
         ClientToServerCommand: NetworkCommand,
     >(
         &mut self,
-        serialization: S,
         compression: C,
     ) {
         self.insert(PostOffice::<
@@ -88,33 +79,29 @@ impl ResourcesExt for Resources {
             ClientToServerMessage,
             ClientToServerCommand,
         >::new());
-        self.insert_required(serialization, compression);
+        self.insert_required(compression);
     }
 
     fn insert_client_resources<
-        S: SerializationStrategy + 'static,
         C: CompressionStrategy + 'static,
         ClientToServerCommand: NetworkCommand,
     >(
         &mut self,
-        serialization: S,
         compression: C,
     ) {
         self.insert(ClientCommandBuffer::<ClientToServerCommand>::with_capacity(
             10,
         ));
         self.insert(ResimulationBuffer::<ClientToServerCommand>::new());
-        self.insert_required(serialization, compression);
+        self.insert_required( compression);
     }
 
-    fn insert_required<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
+    fn insert_required<C: CompressionStrategy + 'static>(
         &mut self,
-        __serialization: S,
         __compression: C,
     ) {
         self.insert(BufferResource::from_capacity(5000));
         self.insert(RegisteredComponentsResource::new());
-        self.insert(Packer::<S, C>::default());
         self.insert(UidAllocator::<Entity>::new());
         self.insert(TrackResource::new());
         self.insert(CommandFrameTicker::new(30.));

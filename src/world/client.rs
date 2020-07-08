@@ -9,8 +9,7 @@ use legion::{
 use log::debug;
 
 use net_sync::{
-    compression::{lz4::Lz4, CompressionStrategy},
-    serialization::{bincode::Bincode, SerializationStrategy},
+    compression::{self, lz4::Lz4, CompressionStrategy},
     synchronisation::{
         ClientCommandBuffer, ClientCommandBufferEntry, CommandFrame, CommandFrameTicker,
         ComponentChanged, ComponentData, NetworkCommand, NetworkMessage, ResimulationBuffer,
@@ -27,15 +26,21 @@ use crate::{
     systems::BuilderExt,
     world::{world_instance::WorldInstance, WorldBuilder},
 };
+use std::ops::DerefMut;
+use std::borrow::BorrowMut;
+use crate::tracking::re_exports::bincode;
+use bincode::DefaultOptions;
 
 pub struct ClientWorldBuilder<
     ServerToClientMessage: NetworkMessage,
     ClientToServerMessage: NetworkMessage,
     ClientToServerCommand: NetworkCommand,
+    CompressionStrategy: compression::CompressionStrategy
 > {
     resources: Resources,
     system_builder: Builder,
 
+    cs: PhantomData<CompressionStrategy>,
     stcm: PhantomData<ServerToClientMessage>,
     ctsm: PhantomData<ClientToServerMessage>,
     ctsc: PhantomData<ClientToServerCommand>,
@@ -45,19 +50,21 @@ impl<
         ServerToClientMessage: NetworkMessage,
         ClientToServerMessage: NetworkMessage,
         ClientToServerCommand: NetworkCommand,
+        CompressionStrategy: compression::CompressionStrategy
     > Default
-    for ClientWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+    for ClientWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand, CompressionStrategy>
 {
     fn default() -> Self {
         ClientWorldBuilder {
             resources: Default::default(),
             system_builder: Builder::default(),
 
+            cs: PhantomData,
             stcm: PhantomData,
             ctsm: PhantomData,
             ctsc: PhantomData,
         }
-        .default_resources::<Bincode, Lz4>()
+        .default_resources::<Lz4>()
         .default_systems()
     }
 }
@@ -66,18 +73,19 @@ impl<
         ServerToClientMessage: NetworkMessage,
         ClientToServerMessage: NetworkMessage,
         ClientToServerCommand: NetworkCommand,
+        CompressionStrategy: compression::CompressionStrategy
     > WorldBuilder
-    for ClientWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+    for ClientWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand, CompressionStrategy>
 {
     type BuildResult =
-        ClientWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>;
+        ClientWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand, CompressionStrategy>;
 
-    fn default_resources<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
+    fn default_resources<C: compression::CompressionStrategy + 'static>(
         self,
     ) -> Self {
         let mut s = self;
         s.resources
-            .insert_client_resources::<S, C, ClientToServerCommand>(S::default(), C::default());
+            .insert_client_resources::<C, ClientToServerCommand>(C::default());
         s
     }
 
@@ -117,13 +125,16 @@ impl<
         ServerToClientMessage: NetworkMessage,
         ClientToServerMessage: NetworkMessage,
         ClientToServerCommand: NetworkCommand,
-    > ClientWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+        CompressionStrategy: compression::CompressionStrategy
+    > ClientWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand, CompressionStrategy>
 {
-    pub fn with_tcp<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
+    pub fn with_tcp<
+//        C: compression::CompressionStrategy + 'static
+    >(
         mut self,
         addr: SocketAddr,
     ) -> Self {
-        self.system_builder = self.system_builder.add_tcp_client_systems::<S, C, ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>();
+        self.system_builder = self.system_builder.add_tcp_client_systems::<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>();
         self.resources.insert_tcp_client_resources::<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>(addr);
         self
     }
@@ -133,12 +144,14 @@ pub struct ClientWorld<
     ServerToClientMessage: NetworkMessage,
     ClientToServerMessage: NetworkMessage,
     ClientToServerCommand: NetworkCommand,
+    CompressionStrategy: compression::CompressionStrategy
 > {
     pub(crate) world: WorldInstance,
     pub(crate) resources: Resources,
     // TODO: HACK, REMOVE!
     has_received_first_message: bool,
 
+    c: PhantomData<CompressionStrategy>,
     stcm: PhantomData<ServerToClientMessage>,
     ctsm: PhantomData<ClientToServerMessage>,
     ctsc: PhantomData<ClientToServerCommand>,
@@ -148,17 +161,19 @@ impl<
         ServerToClientMessage: NetworkMessage,
         ClientToServerMessage: NetworkMessage,
         ClientToServerCommand: NetworkCommand,
-    > ClientWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
+        CompressionStrategy: compression::CompressionStrategy
+    > ClientWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand, CompressionStrategy>
 {
     pub fn new(
         resources: Resources,
         world: WorldInstance,
-    ) -> ClientWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand> {
+    ) -> ClientWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand, CompressionStrategy> {
         ClientWorld {
             world,
             resources,
             has_received_first_message: false,
 
+            c: PhantomData,
             stcm: PhantomData,
             ctsm: PhantomData,
             ctsc: PhantomData,
@@ -210,7 +225,7 @@ impl<
                         if !self.has_received_first_message {
                             debug!("Initial Status Update");
                             self.has_received_first_message = true;
-                            command_ticker.set_command_frame(update.command_frame - 3);
+                            command_ticker.set_command_frame(update.command_frame + 3);
                         }
 
                         let mut state_updater = StateUpdater::new(
@@ -221,6 +236,7 @@ impl<
                             &mut client_buffer,
                             &mut resimulation_buffer,
                             command_ticker.command_frame(),
+                            Lz4
                         );
 
                         state_updater.apply_entity_removals();
@@ -299,7 +315,10 @@ fn adjust_simulation_speed(
     current_command_frame.adjust_simulation(new_rate);
 }
 
-struct StateUpdater<'a, C: NetworkCommand> {
+struct StateUpdater<'a,
+    C: NetworkCommand,
+    CompressionStrategy: compression::CompressionStrategy = Lz4
+> {
     allocator: &'a mut UidAllocator<Entity>,
     world: &'a mut World,
     registry: &'a RegisteredComponentsResource,
@@ -307,9 +326,11 @@ struct StateUpdater<'a, C: NetworkCommand> {
     client_buffer: &'a mut ClientCommandBuffer<C>,
     resimmulation_buffer: &'a mut ResimulationBuffer<C>,
     current_command_frame: CommandFrame,
+
+    phantom: PhantomData<CompressionStrategy>
 }
 
-impl<'a, C: NetworkCommand> StateUpdater<'a, C> {
+impl<'a, C: NetworkCommand, CompressionStrategy: compression::CompressionStrategy> StateUpdater<'a, C, CompressionStrategy> {
     pub fn new(
         allocator: &'a mut UidAllocator<Entity>,
         world: &'a mut World,
@@ -318,7 +339,8 @@ impl<'a, C: NetworkCommand> StateUpdater<'a, C> {
         client_buffer: &'a mut ClientCommandBuffer<C>,
         resimmulation_buffer: &'a mut ResimulationBuffer<C>,
         current_command_frame: CommandFrame,
-    ) -> StateUpdater<'a, C> {
+        _compression: CompressionStrategy
+    ) -> StateUpdater<'a, C, CompressionStrategy> {
         StateUpdater {
             allocator,
             world,
@@ -327,6 +349,7 @@ impl<'a, C: NetworkCommand> StateUpdater<'a, C> {
             client_buffer,
             current_command_frame,
             resimmulation_buffer,
+            phantom: PhantomData
         }
     }
 
@@ -350,20 +373,19 @@ impl<'a, C: NetworkCommand> StateUpdater<'a, C> {
         let registry_by_id = self.registry.by_uid();
 
         for to_insert_entity in self.update.inserted.iter() {
-            let mut buffer = CommandBuffer::new(&self.world);
-            let entity = buffer.start_entity().build();
+            let entity = self.allocator.get_by_val(&to_insert_entity.entity_id());
 
             for component in to_insert_entity.components() {
                 let component_registration = registry_by_id
                     .get(&component.component_id())
                     .expect("Component should be registered.");
-                component_registration.deserialize(&buffer, entity, component.data());
+
+                let mut deserializer = &mut bincode::Deserializer::from_slice(component.data(), DefaultOptions::default());
+                component_registration.add_component(&mut self.world, *entity, &mut erased_serde::Deserializer::erase(deserializer));
             }
 
-            buffer.write(self.world);
-
             self.allocator
-                .allocate(entity, Some(to_insert_entity.entity_id()));
+                .allocate(*entity, Some(to_insert_entity.entity_id()));
         }
     }
 
@@ -392,7 +414,10 @@ impl<'a, C: NetworkCommand> StateUpdater<'a, C> {
             let component_registration = registry_by_id
                 .get(&component_data.component_id())
                 .expect("Component should be registered.");
-            component_registration.add_component(self.world, *entity, component_data.data());
+
+            let mut deserializer = &mut bincode::Deserializer::from_slice(component_data.data(), DefaultOptions::default());
+
+            component_registration.add_component(self.world, *entity, &mut erased_serde::Deserializer::erase(deserializer));
         }
     }
 
@@ -425,16 +450,25 @@ impl<'a, C: NetworkCommand> StateUpdater<'a, C> {
                 .get(&oldest_change.component_type)
                 .expect("Should exist");
 
+            let mut buffer = Vec::new();
+
+            let mut changed = &mut bincode::Deserializer::from_slice(&oldest_change.unchanged_data, DefaultOptions::default());
+            let mut unchanged = &mut bincode::Deserializer::from_slice(&newest_change.changed_data, DefaultOptions::default());
+
+            let mut serializer = &mut bincode::Serializer::new(&mut buffer, DefaultOptions::default());
+
+            let mut serialized = &mut erased_serde::Serializer::erase(serializer);
+
             match registration
-                .serialize_difference(&oldest_change.unchanged_data, &newest_change.changed_data)
+                .serialize_difference(&mut erased_serde::Deserializer::erase(unchanged), &mut erased_serde::Deserializer::erase(changed), serialized.borrow_mut())
             {
-                Ok(Some(client_difference)) => {
+                Ok(true) => {
                     let client_state = ComponentData::new(
                         *self
                             .registry
                             .get_uid(&oldest_change.component_type)
                             .expect("Should exist"),
-                        client_difference,
+                        buffer,
                     );
                     let client_state_match = self
                         .update
@@ -452,12 +486,15 @@ impl<'a, C: NetworkCommand> StateUpdater<'a, C> {
 
                         to_resimmulate.push(oldest_change.entity_id);
 
-                        registration.apply_changes(self.world, *entity, server_difference.1.data());
+                        let mut data = bincode::Deserializer::from_slice(&mut server_difference.1.data(), DefaultOptions::default());
+                        let mut ereased = erased_serde::Deserializer::erase(&mut data);
+
+                        registration.apply_changes(self.world, *entity, &mut ereased)
                     } else {
                         debug!("Predicted Same");
                     }
                 }
-                Ok(None) => debug!("None returned"),
+                Ok(false) => debug!("False returned"),
                 Err(e) => debug!("{:?}", e),
             }
         }

@@ -4,7 +4,6 @@ use legion::{prelude::SystemBuilder, systems::schedule::Builder};
 
 use net_sync::{
     compression::CompressionStrategy,
-    serialization::SerializationStrategy,
     synchronisation::{NetworkCommand, NetworkMessage},
 };
 
@@ -19,8 +18,7 @@ pub trait BuilderExt {
     fn add_server_systems(self) -> Builder;
     fn add_client_systems(self) -> Builder;
     fn add_tcp_server_systems<
-        S: SerializationStrategy + 'static,
-        C: CompressionStrategy + 'static,
+//        C: CompressionStrategy + 'static,
         ServerToClientMessage: NetworkMessage,
         ClientToServerMessage: NetworkMessage,
         ClientToServerCommand: NetworkCommand,
@@ -28,8 +26,7 @@ pub trait BuilderExt {
         self,
     ) -> Builder;
     fn add_tcp_client_systems<
-        S: SerializationStrategy + 'static,
-        C: CompressionStrategy + 'static,
+//        C: CompressionStrategy + 'static,
         ServerToClientMessage: NetworkMessage,
         ClientToServerMessage: NetworkMessage,
         ClientToServerCommand: NetworkCommand,
@@ -48,8 +45,7 @@ impl BuilderExt for Builder {
     }
 
     fn add_tcp_server_systems<
-        S: SerializationStrategy + 'static,
-        C: CompressionStrategy + 'static,
+//        C: CompressionStrategy + 'static,
         ServerToClientMessage: NetworkMessage,
         ClientToServerMessage: NetworkMessage,
         ClientToServerCommand: NetworkCommand,
@@ -62,15 +58,13 @@ impl BuilderExt for Builder {
             ClientToServerCommand,
         >())
         .add_system(tcp::tcp_server_receive_system::<
-            S,
-            C,
+//            C,
             ServerToClientMessage,
             ClientToServerMessage,
             ClientToServerCommand,
         >())
         .add_system(tcp::tcp_server_sent_system::<
-            S,
-            C,
+//            C,
             ServerToClientMessage,
             ClientToServerMessage,
             ClientToServerCommand,
@@ -78,8 +72,7 @@ impl BuilderExt for Builder {
     }
 
     fn add_tcp_client_systems<
-        S: SerializationStrategy + 'static,
-        C: CompressionStrategy + 'static,
+//        C: CompressionStrategy + 'static,
         ServerToClientMessage: NetworkMessage,
         ClientToServerMessage: NetworkMessage,
         ClientToServerCommand: NetworkCommand,
@@ -87,15 +80,13 @@ impl BuilderExt for Builder {
         self,
     ) -> Builder {
         self.add_system(tcp_client_sent_system::<
-            S,
-            C,
+//            C,
             ServerToClientMessage,
             ClientToServerMessage,
             ClientToServerCommand,
         >())
         .add_system(tcp_client_receive_system::<
-            S,
-            C,
+//            C,
             ServerToClientMessage,
             ClientToServerMessage,
             ClientToServerCommand,

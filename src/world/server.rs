@@ -9,7 +9,6 @@ use serde::export::PhantomData;
 
 use net_sync::{
     compression::{lz4::Lz4, CompressionStrategy},
-    serialization::{bincode::Bincode, SerializationStrategy},
     synchronisation::{
         CommandFrameTicker, ComponentData, ModifiedComponentsBuffer, NetworkCommand,
         NetworkMessage, WorldState,
@@ -25,6 +24,8 @@ use crate::{
     systems::BuilderExt,
     world::{world_instance::WorldInstance, WorldBuilder},
 };
+use net_sync::re_exports::bincode;
+use bincode::DefaultOptions;
 
 pub struct ServerConfig {}
 
@@ -62,7 +63,7 @@ impl<
             ctsc: PhantomData,
         }
         .default_systems()
-        .default_resources::<Bincode, Lz4>()
+        .default_resources::<Lz4>()
     }
 }
 
@@ -76,12 +77,12 @@ impl<
     type BuildResult =
         ServerWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>;
 
-    fn default_resources<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
+    fn default_resources<C: CompressionStrategy + 'static>(
         self,
     ) -> Self {
         let mut s = self;
         s.resources
-            .insert_server_resources::<S, C, ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>(S::default(), C::default());
+            .insert_server_resources::<C, ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>(C::default());
         s
     }
 
@@ -124,7 +125,9 @@ impl<
         ClientToServerCommand: NetworkCommand,
     > ServerWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
 {
-    pub fn with_tcp<S: SerializationStrategy + 'static, C: CompressionStrategy + 'static>(
+    pub fn with_tcp<
+//        C: CompressionStrategy + 'static
+    >(
         mut self,
         listener: TcpListener,
     ) -> Self {
@@ -132,7 +135,7 @@ impl<
             .set_nonblocking(true)
             .expect("Cannot set non-blocking on TCP socket.");
         self.resources.insert_tcp_listener_resources(listener);
-        self.system_builder = self.system_builder.add_tcp_server_systems::<S, C, ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>();
+        self.system_builder = self.system_builder.add_tcp_server_systems::<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>();
         self
     }
 
@@ -251,7 +254,6 @@ fn handle_world_events(
     let events = event_handler.handle(&event_resource.legion_receiver(), world, &components);
 
     for legion_event in events {
-        debug!("{:?}", legion_event);
         match legion_event {
             LegionEvent::ComponentAdded(entity, _component_count) => {
                 let identifier = allocator.get(&entity);
@@ -275,15 +277,18 @@ fn handle_world_events(
 
                 let mut entity_components = Vec::new();
 
-                for component in components.slice_with_uid().iter() {
-                    if let Some(serialized_component) = component
+               for component in components.slice_with_uid().iter() {
+                    component
                         .1
-                        .serialize_if_exists_in_world(&world, entity)
-                        .unwrap()
-                    {
-                        entity_components
-                            .push(ComponentData::new(component.0, serialized_component));
-                    }
+                        .serialize_if_exists_in_world(&world, entity, &mut |serialize| {
+                            let mut buffer = Vec::new();
+                            let mut serializer =  &mut bincode::Serializer::new(&mut buffer, DefaultOptions::default());
+
+                           if let Ok(_) = erased_serde::serialize(&serialize, serializer) {
+                               entity_components
+                                   .push(ComponentData::new(component.0, buffer));
+                           }
+                        });
                 }
 
                 world_state.insert_entity(identifier, entity_components);
@@ -302,15 +307,20 @@ fn add_differences_to_state(
     let entries = modification_buffer.drain_entries();
 
     for entry in entries {
-        for ((entity_id, component_type), unchanged) in entry.1 {
+        for ((entity_id, component_type), mut unchanged) in entry.1 {
             let component_id = components.get_uid(&component_type).expect("Should exist");
             let entity = allocator.get_by_val(&entity_id);
 
             let components = components.by_type_id();
             let registered_component = components.get(&component_type).expect("Should exist");
 
+            let mut buffer = Vec::new();
+            let mut serializer = &mut bincode::Serializer::new(&mut buffer, DefaultOptions::default());
+            let mut unchanged = &mut bincode::Deserializer::from_slice(&unchanged, DefaultOptions::default());
+
+
             let difference = registered_component
-                .serialize_difference_with_current(world, *entity, &unchanged)
+                .serialize_difference_with_current(world, *entity,&mut erased_serde::Deserializer::erase(unchanged), &mut erased_serde::Serializer::erase(serializer))
                 .unwrap()
                 .unwrap();
 
