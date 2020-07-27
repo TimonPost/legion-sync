@@ -1,6 +1,10 @@
 use std::net::TcpListener;
 
-use legion::{{any, Entity, Resources, Universe, World}, systems::{Resource, Builder}, passthrough};
+use legion::{
+    any,
+    systems::{Builder, Resource},
+    Entity, Resources, Universe, World,
+};
 use log::debug;
 use serde::export::PhantomData;
 
@@ -21,10 +25,10 @@ use crate::{
     systems::BuilderExt,
     world::{world_instance::WorldInstance, WorldBuilder},
 };
-use bincode::{DefaultOptions, Options};
+use bincode::Options;
 use net_sync::re_exports::bincode;
-use std::time::Instant;
 use serde::de::DeserializeSeed;
+use std::time::Instant;
 
 pub struct ServerConfig {}
 
@@ -107,10 +111,8 @@ impl<
         let universe = Universe::new();
         let mut main_world = universe.create_world();
 
-        s.resources
-            .insert(EventResource::new(&mut main_world));
-        s.resources
-            .insert(universe);
+        s.resources.insert(EventResource::new(&mut main_world));
+        s.resources.insert(universe);
 
         let world = WorldInstance::new(main_world, s.system_builder.build());
 
@@ -149,7 +151,7 @@ pub struct ServerWorld<
     pub(crate) resources: Resources,
     pub(crate) state_update_sequence: u16,
 
-    pub (crate) last_tick: Instant,
+    pub(crate) last_tick: Instant,
 
     stcm: PhantomData<ServerToClientMessage>,
     ctsm: PhantomData<ClientToServerMessage>,
@@ -227,18 +229,23 @@ impl<
                     .unwrap();
 
             // First do an state update to each new client.
-            let new_clients = postoffice.clients()
+            let new_clients = postoffice
+                .clients()
                 .filter(|x| x.1.connected_at() > last_tick)
                 .count();
 
             if new_clients != 0 {
-                let mut new_clients = postoffice.clients_mut()
+                let new_clients = postoffice
+                    .clients_mut()
                     .filter(|x| x.1.connected_at() > last_tick);
 
                 let bytes = bincode::serialize(
-                    &self.world
-                    .world.as_serializable(any(), components.legion_registry())
-                ).unwrap();
+                    &self
+                        .world
+                        .world
+                        .as_serializable(any(), components.legion_registry()),
+                )
+                .unwrap();
 
                 println!("initial state: {:?} {}", bytes, bytes.len());
 
@@ -247,22 +254,25 @@ impl<
 
                     let registry = components.legion_registry();
 
-                    match registry
-                        .as_deserialize(&universe)
-                        .deserialize( &mut bincode::Deserializer::from_slice(&bytes, bincode::DefaultOptions::new()
-                            .with_fixint_encoding()
-                            .allow_trailing_bytes())) {
+                    match registry.as_deserialize(&universe).deserialize(
+                        &mut bincode::Deserializer::from_slice(
+                            &bytes,
+                            bincode::DefaultOptions::new()
+                                .with_fixint_encoding()
+                                .allow_trailing_bytes(),
+                        ),
+                    ) {
                         Ok(world) => {
                             debug!("deserialize: {:?}", world.len());
                         }
-                        Err(e) => {
-                            panic!("{:?}", e)
-                        }
+                        Err(e) => panic!("{:?}", e),
                     }
 
-                    for (_id, mut client) in new_clients {
+                    for (_id, client) in new_clients {
                         debug!("Initial state sync to client {:?}", _id);
-                        client.postbox_mut().send(transport::ServerToClientMessage::InitialStateSync(bytes.clone()))
+                        client.postbox_mut().send(
+                            transport::ServerToClientMessage::InitialStateSync(bytes.clone()),
+                        )
                     }
                 }
             }
@@ -274,7 +284,6 @@ impl<
             }
 
             self.last_tick = Instant::now();
-
         }
     }
 
@@ -328,11 +337,11 @@ fn handle_world_events(
                         .1
                         .serialize_if_exists_in_world(&world, entity, &mut |serialize| {
                             let mut buffer = Vec::new();
-                            let mut serializer = &mut bincode::Serializer::new(
+                            let serializer = &mut bincode::Serializer::new(
                                 &mut buffer,
                                 bincode::DefaultOptions::new()
-                                .with_fixint_encoding()
-                                .allow_trailing_bytes()
+                                    .with_fixint_encoding()
+                                    .allow_trailing_bytes(),
                             );
 
                             if let Ok(_) = erased_serde::serialize(&serialize, serializer) {
@@ -357,7 +366,7 @@ fn add_differences_to_state(
     let entries = modification_buffer.drain_entries();
 
     for entry in entries {
-        for ((entity_id, component_type), mut unchanged) in entry.1 {
+        for ((entity_id, component_type), unchanged) in entry.1 {
             let component_id = components.get_uid(&component_type).expect("Should exist");
             let entity = allocator.get_by_val(&entity_id);
 
@@ -365,15 +374,19 @@ fn add_differences_to_state(
             let registered_component = components.get(&component_type).expect("Should exist");
 
             let mut buffer = Vec::new();
-            let mut serializer =
-                &mut bincode::Serializer::new(&mut buffer, bincode::DefaultOptions::new()
+            let serializer = &mut bincode::Serializer::new(
+                &mut buffer,
+                bincode::DefaultOptions::new()
                     .with_fixint_encoding()
-                    .allow_trailing_bytes());
+                    .allow_trailing_bytes(),
+            );
 
-            let mut unchanged =
-                &mut bincode::Deserializer::from_slice(&unchanged, bincode::DefaultOptions::new()
+            let unchanged = &mut bincode::Deserializer::from_slice(
+                &unchanged,
+                bincode::DefaultOptions::new()
                     .with_fixint_encoding()
-                    .allow_trailing_bytes());
+                    .allow_trailing_bytes(),
+            );
 
             let is_different = registered_component
                 .serialize_difference_with_current(

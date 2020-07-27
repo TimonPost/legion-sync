@@ -2,7 +2,7 @@
 
 use std::net::{SocketAddr, TcpListener};
 
-use legion::{Entity, systems::{Resources}, Registry};
+use legion::{systems::Resources, Entity};
 
 use net_sync::{
     compression::CompressionStrategy,
@@ -24,7 +24,6 @@ pub use self::{
     event::EventResource,
 };
 use net_sync::event::NetworkEventQueue;
-use legion::serialize::SerializableTypeId;
 
 mod buffer;
 mod component;
@@ -102,7 +101,7 @@ impl ResourcesExt for Resources {
         self.insert(CommandFrameTicker::new(30.));
         self.insert(NetworkEventQueue::new());
 
-        let mut registered_components = RegisteredComponentsResource::new();
+        let registered_components = RegisteredComponentsResource::new();
         self.insert(registered_components);
     }
 

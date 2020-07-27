@@ -1,7 +1,7 @@
-use legion::systems::{Resource, Builder};
+use legion::systems::{Builder, Resource};
 
 use crate::register::ComponentRegistration;
-use legion::{Entity, World, world::SubWorld};
+use legion::{world::SubWorld, Entity, World};
 use net_sync::compression::CompressionStrategy;
 
 pub mod client;

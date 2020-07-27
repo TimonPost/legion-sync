@@ -1,14 +1,12 @@
-use std::{any::TypeId, collections::HashMap, sync::Arc};
+use std::{any::TypeId, collections::HashMap};
 
-use legion::world::{EntityStore,SubWorld};
 use legion::{
-    systems::CommandBuffer,
-    Entity,
     storage::{ComponentMeta, ComponentTypeId},
     systems::SystemBuilder,
-    world::World,
+    world::{EntityStore, SubWorld, World},
+    Entity,
 };
-use serde::de::DeserializeSeed;
+
 use serde::{
     export::{
         fmt::{Debug, Error},
@@ -17,16 +15,14 @@ use serde::{
     Deserialize, Serialize,
 };
 
-use net_sync::re_exports::serde_diff;
 use net_sync::{
     error::ErrorKind,
-    track_attr::serde_diff::{Config, Diff, FieldPathMode, SerdeDiff},
+    re_exports::serde_diff,
+    track_attr::serde_diff::{Config, FieldPathMode, SerdeDiff},
     uid::{Uid, UidAllocator},
 };
-use std::marker::PhantomData;
-use std::ptr::NonNull;
+
 use std::any::Any;
-use legion::serialize::SerializableTypeId;
 
 inventory::collect!(ComponentRegistration);
 
@@ -70,11 +66,9 @@ pub struct ComponentRegistration {
     pub(crate) add_component:
         fn(world: &mut World, entity: Entity, data: &mut dyn erased_serde::Deserializer),
 
-    pub(crate) register_into_registry:
-    fn(world: &mut legion::Registry<String>),
+    pub(crate) register_into_registry: fn(world: &mut legion::Registry<String>),
 
-    pub(crate) register_into_merger:
-    fn(world: &mut legion::world::Duplicate),
+    pub(crate) register_into_merger: fn(world: &mut legion::world::Duplicate),
 
     pub(crate) remove_component: fn(world: &mut World, entity: Entity),
 
@@ -149,7 +143,7 @@ impl ComponentRegistration {
         (self.grand_write_access)(system_builder)
     }
 
-    pub fn register_into_registry (&self, registry: &mut legion::Registry<String>) {
+    pub fn register_into_registry(&self, registry: &mut legion::Registry<String>) {
         (self.register_into_registry)(registry)
     }
 
@@ -179,8 +173,6 @@ impl ComponentRegistration {
         (self.apply_changes)(world, entity, data)
     }
 
-
-
     pub fn of<
         T: Clone
             + Debug
@@ -207,14 +199,14 @@ impl ComponentRegistration {
             exists_in_subworld: |world, entity| -> bool {
                 if let Some(entry) = world.entry_ref(entity) {
                     entry.get_component::<T>().is_ok()
-                }else {
+                } else {
                     false
                 }
             },
             exists_in_world: |world, entity| -> bool {
                 if let Some(entry) = world.entry_ref(entity) {
                     entry.get_component::<T>().is_ok()
-                }else {
+                } else {
                     false
                 }
             },
@@ -273,25 +265,24 @@ impl ComponentRegistration {
                     erased_serde::deserialize::<T>(data).expect("failed to deserialize component");
 
                 if let Some(mut entry) = world.entry(entity) {
-                    entry
-                        .add_component::<T>(component);
+                    entry.add_component::<T>(component);
                 }
             },
             remove_component: |world, entity| {
                 if let Some(mut entry) = world.entry(entity) {
-                    entry
-                        .remove_component::<T>();
+                    entry.remove_component::<T>();
                 }
             },
             apply_changes: |world, entity, data| {
                 if let Some(mut entry) = world.entry(entity) {
-                   let mut component = entry
+                    let mut component = entry
                         .get_component_mut::<T>()
                         .expect("Can not apply changes to component.");
 
                     <serde_diff::Apply<T> as serde::de::DeserializeSeed>::deserialize(
                         serde_diff::Apply::deserializable(&mut component),
-                        data);
+                        data,
+                    );
                 };
             },
         }

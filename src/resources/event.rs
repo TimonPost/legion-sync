@@ -1,7 +1,5 @@
 use crossbeam_channel::{unbounded, Receiver, Sender, TryIter};
-use legion::{World, passthrough};
-use legion::world::Event;
-use legion::query::Passthrough;
+use legion::{passthrough, world::Event, World};
 
 pub struct EventResource {
     pub(crate) legion_events_tx: Sender<Event>,
@@ -9,10 +7,7 @@ pub struct EventResource {
 }
 
 impl EventResource {
-    pub fn new(
-        world: &mut World,
-    ) -> EventResource
-    {
+    pub fn new(world: &mut World) -> EventResource {
         let (tx, rx) = unbounded();
 
         world.subscribe(tx.clone(), passthrough());
@@ -35,10 +30,7 @@ impl EventResource {
         &self.legion_events_rx
     }
 
-    pub fn subscribe_to_world(
-        &self,
-        world: &mut World,
-    ) {
+    pub fn subscribe_to_world(&self, world: &mut World) {
         world.subscribe(self.legion_subscriber().clone(), passthrough());
     }
 }

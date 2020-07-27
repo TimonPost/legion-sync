@@ -1,11 +1,8 @@
 //! A number of systems that can be used to synchronize and trace components.
 
-use legion::systems::{SystemBuilder, Builder};
+use legion::systems::{Builder, SystemBuilder};
 
-use net_sync::{
-    compression::CompressionStrategy,
-    synchronisation::{NetworkCommand, NetworkMessage},
-};
+use net_sync::synchronisation::{NetworkCommand, NetworkMessage};
 
 use crate::{
     resources::RegisteredComponentsResource,
@@ -50,22 +47,22 @@ impl BuilderExt for Builder {
         ClientToServerMessage: NetworkMessage,
         ClientToServerCommand: NetworkCommand,
     >(
-        mut self,
+        self,
     ) -> Builder {
-       let mut builder = tcp::tcp_connection_listener::<
+        let builder = tcp::tcp_connection_listener::<
             ServerToClientMessage,
             ClientToServerMessage,
             ClientToServerCommand,
         >(self);
 
-        let mut builder = tcp::tcp_server_receive_system::<
+        let builder = tcp::tcp_server_receive_system::<
             //            C,
             ServerToClientMessage,
             ClientToServerMessage,
             ClientToServerCommand,
         >(builder);
 
-        let mut builder = tcp::tcp_server_sent_system::<
+        let builder = tcp::tcp_server_sent_system::<
             //            C,
             ServerToClientMessage,
             ClientToServerMessage,
@@ -81,16 +78,16 @@ impl BuilderExt for Builder {
         ClientToServerMessage: NetworkMessage,
         ClientToServerCommand: NetworkCommand,
     >(
-        mut self,
+        self,
     ) -> Builder {
-        let mut builder = tcp_client_sent_system::<
+        let builder = tcp_client_sent_system::<
             //            C,
             ServerToClientMessage,
             ClientToServerMessage,
             ClientToServerCommand,
         >(self);
 
-        let mut builder = tcp_client_receive_system::<
+        let builder = tcp_client_receive_system::<
             //            C,
             ServerToClientMessage,
             ClientToServerMessage,

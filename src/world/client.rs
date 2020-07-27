@@ -1,11 +1,16 @@
 use std::{marker::PhantomData, net::SocketAddr};
 
 use itertools::Itertools;
-use legion::{Resources, world::{Entity, World}, systems::{Resource, CommandBuffer, Builder}, world::Universe, passthrough, EntityStore, any};
+use legion::{
+    any, passthrough,
+    systems::{Builder, CommandBuffer, Resource},
+    world::{Entity, Universe, World},
+    EntityStore, Resources,
+};
 use log::debug;
 
 use net_sync::{
-    compression::{self, lz4::Lz4, CompressionStrategy},
+    compression::{self, lz4::Lz4},
     synchronisation::{
         ClientCommandBuffer, ClientCommandBufferEntry, CommandFrame, CommandFrameTicker,
         ComponentChanged, ComponentData, NetworkCommand, NetworkMessage, ResimulationBuffer,
@@ -16,19 +21,15 @@ use net_sync::{
     uid::UidAllocator,
 };
 
-use crate::tracking::re_exports::bincode;
 use crate::{
-    // filters::filter_fns::registered,
     resources::{EventResource, RegisteredComponentsResource, ResourcesExt},
     systems::BuilderExt,
+    tracking::re_exports::bincode,
     world::{world_instance::WorldInstance, WorldBuilder},
 };
-use bincode::{DefaultOptions, Options};
-use std::borrow::BorrowMut;
-use std::ops::DerefMut;
+use bincode::Options;
 use serde::de::DeserializeSeed;
-use serde_json::Value;
-use std::io::Write;
+use std::{borrow::BorrowMut, ops::DerefMut};
 
 pub struct ClientWorldBuilder<
     ServerToClientMessage: NetworkMessage,
@@ -123,10 +124,8 @@ impl<
         let universe = Universe::new();
         let mut main_world = universe.create_world();
 
-        s.resources
-            .insert(EventResource::new(&mut main_world));
-        s.resources
-            .insert(universe);
+        s.resources.insert(EventResource::new(&mut main_world));
+        s.resources.insert(universe);
 
         let main_world = WorldInstance::new(main_world, s.system_builder.build());
 
@@ -277,39 +276,57 @@ impl<
                         println!("initial state: {:?} {}", world_state, world_state.len());
 
                         let registry = registered.legion_registry();
-                        match registry
-                            .as_deserialize(&universe)
-                            .deserialize( &mut bincode::Deserializer::from_slice(&world_state, bincode::DefaultOptions::new()
-                                .with_fixint_encoding()
-                               .allow_trailing_bytes())) {
+                        match registry.as_deserialize(&universe).deserialize(
+                            &mut bincode::Deserializer::from_slice(
+                                &world_state,
+                                bincode::DefaultOptions::new()
+                                    .with_fixint_encoding()
+                                    .allow_trailing_bytes(),
+                            ),
+                        ) {
                             Ok(world) => {
                                 debug!("Current world length: {:?}", self.world.world.len());
 
                                 let mutex = registered.legion_merger();
                                 let mut merger = mutex.lock().unwrap();
-                                let merge_result = self.world.world.clone_from(&world, &any(), merger.deref_mut()).expect("Should have merged");
+                                let merge_result = self
+                                    .world
+                                    .world
+                                    .clone_from(&world, &any(), merger.deref_mut())
+                                    .expect("Should have merged");
 
                                 debug!("Merge results: {:?}", merge_result);
 
                                 for merge in merge_result.iter() {
                                     let entry = self.world.world.entry(*merge.1).unwrap();
                                     let uid = entry.get_component::<net_sync::uid::Uid>();
-                                    debug!("allocation result {}", uid_allocator.allocate(*merge.1, uid.map_or(None, |u| Some(*u))));
+                                    debug!(
+                                        "allocation result {}",
+                                        uid_allocator
+                                            .allocate(*merge.1, uid.map_or(None, |u| Some(*u)))
+                                    );
                                 }
 
-                                debug!("Merge deserialized word {:?}, new state world {:?}", world.len(), self.world.world.len());
+                                debug!(
+                                    "Merge deserialized word {:?}, new state world {:?}",
+                                    world.len(),
+                                    self.world.world.len()
+                                );
 
-                                let serialized = serde_json::to_value(self.world.world.as_serializable(any(), registered.legion_registry())).unwrap();
+                                let serialized = serde_json::to_value(
+                                    self.world
+                                        .world
+                                        .as_serializable(any(), registered.legion_registry()),
+                                )
+                                .unwrap();
                                 debug!("{:#}", serialized.to_string());
                             }
                             Err(e) => {
                                 panic!("{:?}", e);
                             }
                         }
-                    },
-                    _ => {
-
                     }
+                    _ => {}
                 }
             }
 
@@ -446,10 +463,8 @@ impl<'a, C: NetworkCommand, CompressionStrategy: compression::CompressionStrateg
                     .get(&component.component_id())
                     .expect("Component should be registered.");
 
-                let mut deserializer = &mut bincode::Deserializer::from_slice(
-                    component.data(),
-                    default_options(),
-                );
+                let deserializer =
+                    &mut bincode::Deserializer::from_slice(component.data(), default_options());
                 component_registration.add_component(
                     &mut self.world,
                     entity,
@@ -488,10 +503,8 @@ impl<'a, C: NetworkCommand, CompressionStrategy: compression::CompressionStrateg
                 .get(&component_data.component_id())
                 .expect("Component should be registered.");
 
-            let mut deserializer = &mut bincode::Deserializer::from_slice(
-                component_data.data(),
-                default_options(),
-            );
+            let deserializer =
+                &mut bincode::Deserializer::from_slice(component_data.data(), default_options());
 
             component_registration.add_component(
                 self.world,
@@ -540,13 +553,13 @@ impl<'a, C: NetworkCommand, CompressionStrategy: compression::CompressionStrateg
                 .expect("Should exist");
 
             // Create deserializer of the oldest changed component.
-            let mut oldest_change_deserializer = &mut bincode::Deserializer::from_slice(
+            let oldest_change_deserializer = &mut bincode::Deserializer::from_slice(
                 &oldest_change.unchanged_data,
                 default_options(),
             );
 
             // Create deserializer for the unchanged component.
-            let mut latest_change_deserializer = &mut bincode::Deserializer::from_slice(
+            let latest_change_deserializer = &mut bincode::Deserializer::from_slice(
                 &latest_change.changed_data,
                 default_options(),
             );
@@ -557,7 +570,7 @@ impl<'a, C: NetworkCommand, CompressionStrategy: compression::CompressionStrateg
             let mut buffer = Vec::new();
 
             let mut bincode = bincode::Serializer::new(&mut buffer, default_options());
-            let mut serialized = &mut erased_serde::Serializer::erase(&mut bincode);
+            let serialized = &mut erased_serde::Serializer::erase(&mut bincode);
 
             match registration.serialize_difference(
                 &mut erased_serde::Deserializer::erase(latest_change_deserializer),
@@ -602,10 +615,15 @@ impl<'a, C: NetworkCommand, CompressionStrategy: compression::CompressionStrateg
                         );
 
                         // Create deserializer of the server-difference.
-                        let mut server_difference_deserializer = erased_serde::Deserializer::erase(&mut bincode);
+                        let mut server_difference_deserializer =
+                            erased_serde::Deserializer::erase(&mut bincode);
 
                         // Now apply the authoritative server-differences.
-                        registration.apply_changes(self.world, *entity, &mut server_difference_deserializer)
+                        registration.apply_changes(
+                            self.world,
+                            *entity,
+                            &mut server_difference_deserializer,
+                        )
                     } else {
                         debug!("Predicted Same");
                     }
@@ -618,19 +636,19 @@ impl<'a, C: NetworkCommand, CompressionStrategy: compression::CompressionStrateg
         let registry_by_uid = self.registry.by_uid();
 
         for change in self.update.changed.iter() {
-            if let Some(registration) = registry_by_uid.get(&change.component_data().component_id()) {
+            if let Some(registration) = registry_by_uid.get(&change.component_data().component_id())
+            {
                 debug!("{:?} component changed", registration.type_name());
 
                 // Get allocated entity id.
                 let entity = self.allocator.get_by_val(&change.entity_id());
 
-                let mut bincode = bincode::Deserializer::from_slice(
-                    &mut change.1.data(),
-                    default_options(),
-                );
+                let mut bincode =
+                    bincode::Deserializer::from_slice(&mut change.1.data(), default_options());
 
                 // Create deserializer of the server-difference.
-                let mut server_difference_deserializer = erased_serde::Deserializer::erase(&mut bincode);
+                let mut server_difference_deserializer =
+                    erased_serde::Deserializer::erase(&mut bincode);
 
                 // Now apply the authoritative server-differences.
                 registration.apply_changes(self.world, *entity, &mut server_difference_deserializer)

@@ -12,8 +12,7 @@ use std::{
 use net_sync::uid::Uid;
 
 use crate::register::{ComponentRegister, ComponentRegistrationRef};
-use legion::serialize::SerializableTypeId;
-use itertools::merge;
+
 use legion::Registry;
 
 unsafe impl Send for RegisteredComponentsResource {}
@@ -29,8 +28,8 @@ pub struct RegisteredComponentsResource {
     registration_by_type_id: Arc<Mutex<HashMap<TypeId, ComponentRegistrationRef>>>,
     uid_with_registration: Arc<Mutex<Vec<(Uid, ComponentRegistrationRef)>>>,
 
-    pub (crate) legion_registry: legion::Registry<String>,
-    pub (crate) merger: Mutex<legion::world::Duplicate>
+    pub(crate) legion_registry: legion::Registry<String>,
+    pub(crate) merger: Mutex<legion::world::Duplicate>,
 }
 
 impl RegisteredComponentsResource {
@@ -72,7 +71,7 @@ impl RegisteredComponentsResource {
             uid_with_registration: Arc::new(Mutex::new(sorted_registry)),
 
             legion_registry: registry,
-            merger: Mutex::new(merger)
+            merger: Mutex::new(merger),
         }
     }
 
