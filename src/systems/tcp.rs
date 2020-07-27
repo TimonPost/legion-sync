@@ -1,4 +1,4 @@
-use legion::systems::{Builder, Schedulable, System, SystemBuilder};
+use legion::systems::{Builder, SystemBuilder};
 
 use net_sync::{
     synchronisation::{CommandFrameTicker, NetworkCommand, NetworkMessage},

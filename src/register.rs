@@ -22,8 +22,6 @@ use net_sync::{
     uid::{Uid, UidAllocator},
 };
 
-use std::any::Any;
-
 inventory::collect!(ComponentRegistration);
 
 pub type ComponentRegistrationRef = &'static ComponentRegistration;

@@ -17,7 +17,7 @@ legion-sync-macro = {path = "../legion-sync-macro" }
 itertools = "0.9.0"
 crossbeam-channel="0.4.2"
 #git="https://github.com/TomGillen/legion"
-legion = { path = "../../legion", branch="experimental", version = "0.3.0", default-features=false, features=["serialize", "crossbeam-events"] }
+legion = { path = "../../legion", branch="master", version = "0.3.0", default-features=false, features=["serialize", "crossbeam-events"] }
 serde = "1.0.104"
 log = "0.4.8"
 inventory = "0.1"

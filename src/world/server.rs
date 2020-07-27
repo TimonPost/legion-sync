@@ -26,7 +26,6 @@ use crate::{
 };
 use bincode::Options;
 use net_sync::re_exports::bincode;
-use serde::de::DeserializeSeed;
 use std::time::Instant;
 
 pub struct ServerConfig {}

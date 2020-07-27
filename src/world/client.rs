@@ -2,10 +2,10 @@ use std::{marker::PhantomData, net::SocketAddr};
 
 use itertools::Itertools;
 use legion::{
-    any, passthrough,
-    systems::{Builder, CommandBuffer, Resource},
+    any,
+    systems::{Builder, Resource},
     world::{Entity, Universe, World},
-    EntityStore, Resources,
+    Resources,
 };
 
 use net_sync::{
@@ -596,7 +596,7 @@ impl<'a, C: NetworkCommand, CompressionStrategy: compression::CompressionStrateg
                     }
                 }
                 Ok(false) => {}
-                Err(e) => debug!("{:?}", e),
+                Err(e) => panic!("{:?}", e),
             }
         }
 
