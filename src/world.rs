@@ -5,7 +5,6 @@ use legion::{world::SubWorld, Entity, World};
 use net_sync::compression::CompressionStrategy;
 
 pub mod client;
-pub mod serialize;
 pub mod server;
 pub mod world_instance;
 
