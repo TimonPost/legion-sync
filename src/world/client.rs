@@ -7,7 +7,6 @@ use legion::{
     world::{Entity, Universe, World},
     EntityStore, Resources,
 };
-use log::debug;
 
 use net_sync::{
     compression::{self, lz4::Lz4},
@@ -250,7 +249,6 @@ impl<
                         );
 
                         if !self.has_received_first_message {
-                            debug!("Initial Status Update");
                             self.has_received_first_message = true;
                             command_ticker.set_command_frame(update.command_frame + 3);
                         }
@@ -273,8 +271,6 @@ impl<
                         state_updater.apply_changed_components();
                     }
                     transport::ServerToClientMessage::InitialStateSync(world_state) => {
-                        println!("initial state: {:?} {}", world_state, world_state.len());
-
                         let registry = registered.legion_registry();
                         match registry.as_deserialize(&universe).deserialize(
                             &mut bincode::Deserializer::from_slice(
@@ -285,8 +281,6 @@ impl<
                             ),
                         ) {
                             Ok(world) => {
-                                debug!("Current world length: {:?}", self.world.world.len());
-
                                 let mutex = registered.legion_merger();
                                 let mut merger = mutex.lock().unwrap();
                                 let merge_result = self
@@ -295,23 +289,10 @@ impl<
                                     .clone_from(&world, &any(), merger.deref_mut())
                                     .expect("Should have merged");
 
-                                debug!("Merge results: {:?}", merge_result);
-
                                 for merge in merge_result.iter() {
                                     let entry = self.world.world.entry(*merge.1).unwrap();
                                     let uid = entry.get_component::<net_sync::uid::Uid>();
-                                    debug!(
-                                        "allocation result {}",
-                                        uid_allocator
-                                            .allocate(*merge.1, uid.map_or(None, |u| Some(*u)))
-                                    );
                                 }
-
-                                debug!(
-                                    "Merge deserialized word {:?}, new state world {:?}",
-                                    world.len(),
-                                    self.world.world.len()
-                                );
 
                                 let serialized = serde_json::to_value(
                                     self.world
@@ -319,7 +300,6 @@ impl<
                                         .as_serializable(any(), registered.legion_registry()),
                                 )
                                 .unwrap();
-                                debug!("{:#}", serialized.to_string());
                             }
                             Err(e) => {
                                 panic!("{:?}", e);
@@ -332,8 +312,6 @@ impl<
 
             // Sent commands to server
             for command in client_buffer.iter_history(1) {
-                debug!("Send Command");
-
                 postbox.send(transport::ClientToServerMessage::Command(
                     command.command_frame.clone(),
                     command.command.clone(),
@@ -438,7 +416,6 @@ impl<'a, C: NetworkCommand, CompressionStrategy: compression::CompressionStrateg
 
     // Handle remove events, and clear mappings to prevent merge of removed entities and delete entity from worlds.
     fn apply_entity_removals(&mut self) {
-        debug!("State Update; Removing Entities...");
         for to_remove_entity in self.update.removed.iter() {
             let entity = self.allocator.get_by_val(to_remove_entity).clone();
 
@@ -451,8 +428,6 @@ impl<'a, C: NetworkCommand, CompressionStrategy: compression::CompressionStrateg
     }
 
     fn apply_entity_inserts(&mut self) {
-        debug!("State Update; Inserting entities...");
-
         let registry_by_id = self.registry.by_uid();
 
         for to_insert_entity in self.update.inserted.iter() {
@@ -478,8 +453,6 @@ impl<'a, C: NetworkCommand, CompressionStrategy: compression::CompressionStrateg
     }
 
     fn apply_removed_components(&mut self) {
-        debug!("State Update; Removing components...");
-
         let registry_by_id = self.registry.by_uid();
 
         for to_remove_component in self.update.component_removed.iter() {
@@ -492,8 +465,6 @@ impl<'a, C: NetworkCommand, CompressionStrategy: compression::CompressionStrateg
     }
 
     fn apply_added_components(&mut self) {
-        debug!("State Update; Adding components...");
-
         let registry_by_id = self.registry.by_uid();
 
         for to_add_component in self.update.component_added.iter() {
@@ -515,8 +486,6 @@ impl<'a, C: NetworkCommand, CompressionStrategy: compression::CompressionStrateg
     }
 
     fn apply_changed_components(&mut self) {
-        debug!("State Update; Changing components...");
-
         // In this buffer the wrong client predicted state is stored.
         let mut to_resimmulate = Vec::new();
 
@@ -624,11 +593,9 @@ impl<'a, C: NetworkCommand, CompressionStrategy: compression::CompressionStrateg
                             *entity,
                             &mut server_difference_deserializer,
                         )
-                    } else {
-                        debug!("Predicted Same");
                     }
                 }
-                Ok(false) => debug!("False returned"),
+                Ok(false) => {}
                 Err(e) => debug!("{:?}", e),
             }
         }
@@ -638,8 +605,6 @@ impl<'a, C: NetworkCommand, CompressionStrategy: compression::CompressionStrateg
         for change in self.update.changed.iter() {
             if let Some(registration) = registry_by_uid.get(&change.component_data().component_id())
             {
-                debug!("{:?} component changed", registration.type_name());
-
                 // Get allocated entity id.
                 let entity = self.allocator.get_by_val(&change.entity_id());
 

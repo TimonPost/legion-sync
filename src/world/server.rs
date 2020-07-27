@@ -5,7 +5,6 @@ use legion::{
     systems::{Builder, Resource},
     Entity, Resources, Universe, World,
 };
-use log::debug;
 use serde::export::PhantomData;
 
 use net_sync::{
@@ -247,29 +246,12 @@ impl<
                 )
                 .unwrap();
 
-                println!("initial state: {:?} {}", bytes, bytes.len());
-
                 if bytes.len() != 0 {
                     let universe = resources.get_mut::<Universe>().unwrap();
 
                     let registry = components.legion_registry();
 
-                    match registry.as_deserialize(&universe).deserialize(
-                        &mut bincode::Deserializer::from_slice(
-                            &bytes,
-                            bincode::DefaultOptions::new()
-                                .with_fixint_encoding()
-                                .allow_trailing_bytes(),
-                        ),
-                    ) {
-                        Ok(world) => {
-                            debug!("deserialize: {:?}", world.len());
-                        }
-                        Err(e) => panic!("{:?}", e),
-                    }
-
                     for (_id, client) in new_clients {
-                        debug!("Initial state sync to client {:?}", _id);
                         client.postbox_mut().send(
                             transport::ServerToClientMessage::InitialStateSync(bytes.clone()),
                         )
