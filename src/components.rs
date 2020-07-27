@@ -5,9 +5,7 @@ use std::ops::{Deref, DerefMut};
 use serde::{Deserialize, Serialize};
 
 use net_sync::{
-    track_attr::{
-        serde_diff::{self, *},
-    },
+    track_attr::serde_diff::{self, *},
     uid::Uid,
 };
 

@@ -1,20 +1,17 @@
-use legion::systems::{resource::Resource, schedule::Builder};
+use legion::systems::{Builder, Resource};
 
 use crate::register::ComponentRegistration;
-use legion::prelude::{Entity, World, SubWorld};
-use net_sync::{compression::CompressionStrategy};
+use legion::{world::SubWorld, Entity, World};
+use net_sync::compression::CompressionStrategy;
 
 pub mod client;
 pub mod server;
 pub mod world_instance;
-pub mod serialize;
 
 pub trait WorldBuilder {
     type BuildResult;
 
-    fn default_resources<C: CompressionStrategy + 'static>(
-        self,
-    ) -> Self;
+    fn default_resources<C: CompressionStrategy + 'static>(self) -> Self;
 
     fn default_systems(self) -> Self;
 

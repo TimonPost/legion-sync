@@ -5,7 +5,6 @@ pub mod systems;
 #[macro_use]
 pub mod register;
 pub mod event;
-pub mod filters;
 pub mod world;
 
 pub mod tracking {

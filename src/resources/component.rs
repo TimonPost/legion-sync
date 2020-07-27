@@ -13,6 +13,11 @@ use net_sync::uid::Uid;
 
 use crate::register::{ComponentRegister, ComponentRegistrationRef};
 
+use legion::Registry;
+
+unsafe impl Send for RegisteredComponentsResource {}
+unsafe impl Sync for RegisteredComponentsResource {}
+
 // Here we store three instances of registration storage's.
 // This is relatively cheap because they store references and allow us to retrieve an registration by key.
 pub struct RegisteredComponentsResource {
@@ -22,6 +27,9 @@ pub struct RegisteredComponentsResource {
     registration_by_uid: Arc<Mutex<HashMap<Uid, ComponentRegistrationRef>>>,
     registration_by_type_id: Arc<Mutex<HashMap<TypeId, ComponentRegistrationRef>>>,
     uid_with_registration: Arc<Mutex<Vec<(Uid, ComponentRegistrationRef)>>>,
+
+    pub(crate) legion_registry: legion::Registry<String>,
+    pub(crate) merger: Mutex<legion::world::Duplicate>,
 }
 
 impl RegisteredComponentsResource {
@@ -40,12 +48,18 @@ impl RegisteredComponentsResource {
 
         sorted_registry.sort_by(|a, b| a.1.ty().partial_cmp(&b.1.ty()).unwrap());
 
+        let mut registry = legion::Registry::<String>::new();
+        let mut merger = legion::world::Duplicate::new();
+
         for entry in sorted_registry.iter() {
             by_uid.insert(entry.0, entry.1);
             by_type_id.insert(entry.1.ty(), entry.1);
 
             type_id_with_uid.insert(entry.1.ty(), entry.0);
             uid_with_type_id.insert(entry.0, entry.1.ty());
+
+            entry.1.register_into_registry(&mut registry);
+            entry.1.register_into_merger(&mut merger);
         }
 
         Self {
@@ -55,6 +69,9 @@ impl RegisteredComponentsResource {
             registration_by_uid: Arc::new(Mutex::new(by_uid)),
             registration_by_type_id: Arc::new(Mutex::new(by_type_id)),
             uid_with_registration: Arc::new(Mutex::new(sorted_registry)),
+
+            legion_registry: registry,
+            merger: Mutex::new(merger),
         }
     }
 
@@ -76,6 +93,18 @@ impl RegisteredComponentsResource {
 
     pub fn get_uid(&self, type_id: &TypeId) -> Option<&Uid> {
         self.type_id_with_uid.get(type_id)
+    }
+
+    pub fn legion_registry(&self) -> &Registry<String> {
+        &self.legion_registry
+    }
+
+    pub fn legion_registry_mut(&mut self) -> &mut Registry<String> {
+        &mut self.legion_registry
+    }
+
+    pub fn legion_merger(&self) -> &Mutex<legion::world::Duplicate> {
+        &self.merger
     }
 }
 

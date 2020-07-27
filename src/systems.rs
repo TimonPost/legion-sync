@@ -1,11 +1,8 @@
 //! A number of systems that can be used to synchronize and trace components.
 
-use legion::{prelude::SystemBuilder, systems::schedule::Builder};
+use legion::systems::{Builder, SystemBuilder};
 
-use net_sync::{
-    compression::CompressionStrategy,
-    synchronisation::{NetworkCommand, NetworkMessage},
-};
+use net_sync::synchronisation::{NetworkCommand, NetworkMessage};
 
 use crate::{
     resources::RegisteredComponentsResource,
@@ -18,7 +15,7 @@ pub trait BuilderExt {
     fn add_server_systems(self) -> Builder;
     fn add_client_systems(self) -> Builder;
     fn add_tcp_server_systems<
-//        C: CompressionStrategy + 'static,
+        //        C: CompressionStrategy + 'static,
         ServerToClientMessage: NetworkMessage,
         ClientToServerMessage: NetworkMessage,
         ClientToServerCommand: NetworkCommand,
@@ -26,7 +23,7 @@ pub trait BuilderExt {
         self,
     ) -> Builder;
     fn add_tcp_client_systems<
-//        C: CompressionStrategy + 'static,
+        //        C: CompressionStrategy + 'static,
         ServerToClientMessage: NetworkMessage,
         ClientToServerMessage: NetworkMessage,
         ClientToServerCommand: NetworkCommand,
@@ -45,52 +42,59 @@ impl BuilderExt for Builder {
     }
 
     fn add_tcp_server_systems<
-//        C: CompressionStrategy + 'static,
+        //        C: CompressionStrategy + 'static,
         ServerToClientMessage: NetworkMessage,
         ClientToServerMessage: NetworkMessage,
         ClientToServerCommand: NetworkCommand,
     >(
         self,
     ) -> Builder {
-        self.add_system(tcp::tcp_connection_listener::<
+        let builder = tcp::tcp_connection_listener::<
             ServerToClientMessage,
             ClientToServerMessage,
             ClientToServerCommand,
-        >())
-        .add_system(tcp::tcp_server_receive_system::<
-//            C,
+        >(self);
+
+        let builder = tcp::tcp_server_receive_system::<
+            //            C,
             ServerToClientMessage,
             ClientToServerMessage,
             ClientToServerCommand,
-        >())
-        .add_system(tcp::tcp_server_sent_system::<
-//            C,
+        >(builder);
+
+        let builder = tcp::tcp_server_sent_system::<
+            //            C,
             ServerToClientMessage,
             ClientToServerMessage,
             ClientToServerCommand,
-        >())
+        >(builder);
+
+        builder
     }
 
     fn add_tcp_client_systems<
-//        C: CompressionStrategy + 'static,
+        //        C: CompressionStrategy + 'static,
         ServerToClientMessage: NetworkMessage,
         ClientToServerMessage: NetworkMessage,
         ClientToServerCommand: NetworkCommand,
     >(
         self,
     ) -> Builder {
-        self.add_system(tcp_client_sent_system::<
-//            C,
+        let builder = tcp_client_sent_system::<
+            //            C,
             ServerToClientMessage,
             ClientToServerMessage,
             ClientToServerCommand,
-        >())
-        .add_system(tcp_client_receive_system::<
-//            C,
+        >(self);
+
+        let builder = tcp_client_receive_system::<
+            //            C,
             ServerToClientMessage,
             ClientToServerMessage,
             ClientToServerCommand,
-        >())
+        >(builder);
+
+        builder
     }
 }
 
