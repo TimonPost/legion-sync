@@ -1,11 +1,7 @@
 use crossbeam_channel::{unbounded, Receiver, Sender, TryIter};
-use legion::{
-    filter::{
-        ArchetypeFilterData, ChunkFilterData, ChunksetFilterData, EntityFilter, EntityFilterTuple,
-        Filter,
-    },
-    prelude::{Event, World},
-};
+use legion::{World, passthrough};
+use legion::world::Event;
+use legion::query::Passthrough;
 
 pub struct EventResource {
     pub(crate) legion_events_tx: Sender<Event>,
@@ -13,18 +9,13 @@ pub struct EventResource {
 }
 
 impl EventResource {
-    pub fn new<A, B, C>(
+    pub fn new(
         world: &mut World,
-        event_filter: EntityFilterTuple<A, B, C>,
     ) -> EventResource
-    where
-        A: for<'a> Filter<ArchetypeFilterData<'a>> + Clone + 'static,
-        B: for<'a> Filter<ChunksetFilterData<'a>> + Clone + 'static,
-        C: for<'a> Filter<ChunkFilterData<'a>> + Clone + 'static,
     {
         let (tx, rx) = unbounded();
 
-        world.subscribe(tx.clone(), event_filter);
+        world.subscribe(tx.clone(), passthrough());
 
         EventResource {
             legion_events_tx: tx,
@@ -44,11 +35,10 @@ impl EventResource {
         &self.legion_events_rx
     }
 
-    pub fn subscribe_to_world<F: EntityFilter + Sync + 'static>(
+    pub fn subscribe_to_world(
         &self,
         world: &mut World,
-        filter: F,
     ) {
-        world.subscribe(self.legion_subscriber().clone(), filter);
+        world.subscribe(self.legion_subscriber().clone(), passthrough());
     }
 }

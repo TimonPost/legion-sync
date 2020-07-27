@@ -1,4 +1,4 @@
-use legion::prelude::{Resources, Schedule, World};
+use legion::{Schedule, World, Resources};
 
 pub struct WorldInstance {
     pub(crate) world: World,

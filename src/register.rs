@@ -1,28 +1,32 @@
 use std::{any::TypeId, collections::HashMap, sync::Arc};
 
+use legion::world::{EntityStore,SubWorld};
 use legion::{
-    command::CommandBuffer,
-    prelude::Entity,
+    systems::CommandBuffer,
+    Entity,
     storage::{ComponentMeta, ComponentTypeId},
     systems::SystemBuilder,
     world::World,
 };
-use legion::prelude::{EntityStore, SubWorld};
+use serde::de::DeserializeSeed;
 use serde::{
-    Deserialize,
     export::{
         fmt::{Debug, Error},
         Formatter,
-    }, Serialize,
+    },
+    Deserialize, Serialize,
 };
-use serde::de::DeserializeSeed;
 
+use net_sync::re_exports::serde_diff;
 use net_sync::{
     error::ErrorKind,
     track_attr::serde_diff::{Config, Diff, FieldPathMode, SerdeDiff},
     uid::{Uid, UidAllocator},
 };
-use net_sync::re_exports::serde_diff;
+use std::marker::PhantomData;
+use std::ptr::NonNull;
+use std::any::Any;
+use legion::serialize::SerializableTypeId;
 
 inventory::collect!(ComponentRegistration);
 
@@ -36,22 +40,14 @@ pub struct ComponentRegistration {
     pub(crate) type_name: &'static str,
 
     pub(crate) components_clone: fn(*const u8, *mut u8, usize),
-    // The following functions are duplicated, I prefer static duplication.
-    // Alternative can be to abstract 'World' behind an trait. Though `get_component` requires an generic parameters.
-    // Which makes the abstraction a non-trait object wherefore we can't pass into an function pointer.
-    pub(crate) exists_in_world: fn(
-        world: &World,
-        entity: Entity,
-    ) -> bool,
 
-    pub(crate) exists_in_subworld: fn(
-        world: &SubWorld,
-        entity: Entity,
-    ) -> bool,
+    pub(crate) exists_in_world: fn(world: &World, entity: Entity) -> bool,
+
+    pub(crate) exists_in_subworld: fn(world: &SubWorld, entity: Entity) -> bool,
 
     pub(crate) serialize_if_exists_in_world: fn(
         world: &World,
-        entity: legion::entity::Entity,
+        entity: Entity,
         serialize_fn: &mut dyn FnMut(&dyn erased_serde::Serialize),
     ),
 
@@ -63,34 +59,27 @@ pub struct ComponentRegistration {
 
     pub(crate) serialize_difference_with_current: fn(
         world: &World,
-        entity: legion::entity::Entity,
+        entity: Entity,
         unchanged: &mut dyn erased_serde::Deserializer,
         serializer: &mut dyn erased_serde::Serializer,
-    ) -> Result<Option<Vec<u8>>, ErrorKind>,
+    ) -> Result<bool, ErrorKind>,
 
-    pub(crate) grand_write_access: fn(
-        system_builder: SystemBuilder
-    ) -> SystemBuilder,
-    pub(crate) grand_read_access: fn(
-        system_builder: SystemBuilder
-    ) -> SystemBuilder,
+    pub(crate) grand_write_access: fn(system_builder: SystemBuilder) -> SystemBuilder,
+    pub(crate) grand_read_access: fn(system_builder: SystemBuilder) -> SystemBuilder,
 
-    pub(crate) add_component: fn(
-        world: &mut World,
-        entity: Entity,
-        data: &mut dyn erased_serde::Deserializer,
-    ),
+    pub(crate) add_component:
+        fn(world: &mut World, entity: Entity, data: &mut dyn erased_serde::Deserializer),
 
-    pub(crate) remove_component: fn(
-        world: &mut World,
-        entity: Entity,
-    ),
+    pub(crate) register_into_registry:
+    fn(world: &mut legion::Registry<String>),
 
-    pub(crate) apply_changes: fn(
-        world: &mut World,
-        entity: Entity,
-        changes: &mut dyn erased_serde::Deserializer,
-    ),
+    pub(crate) register_into_merger:
+    fn(world: &mut legion::world::Duplicate),
+
+    pub(crate) remove_component: fn(world: &mut World, entity: Entity),
+
+    pub(crate) apply_changes:
+        fn(world: &mut World, entity: Entity, changes: &mut dyn erased_serde::Deserializer),
 }
 
 impl Debug for ComponentRegistration {
@@ -116,19 +105,20 @@ impl ComponentRegistration {
         self.type_name
     }
 
-    pub fn exists_in_subworld(&self, world: &SubWorld, entity: legion::entity::Entity) -> bool {
+    pub fn exists_in_subworld(&self, world: &SubWorld, entity: Entity) -> bool {
         (self.exists_in_subworld)(world, entity)
     }
 
-    pub fn exists_in_world(&self, world: &World, entity: legion::entity::Entity) -> bool {
+    pub fn exists_in_world(&self, world: &World, entity: Entity) -> bool {
         (self.exists_in_world)(world, entity)
     }
 
     pub fn serialize_if_exists_in_world(
         &self,
         world: &World,
-        entity: legion::entity::Entity,
-        serialize_fn: &mut dyn FnMut(&dyn erased_serde::Serialize)) {
+        entity: Entity,
+        serialize_fn: &mut dyn FnMut(&dyn erased_serde::Serialize),
+    ) {
         (self.serialize_if_exists_in_world)(world, entity, serialize_fn)
     }
 
@@ -136,18 +126,18 @@ impl ComponentRegistration {
         &self,
         unchanged: &mut dyn erased_serde::Deserializer,
         changed: &mut dyn erased_serde::Deserializer,
-        serializer: &mut dyn erased_serde::Serializer
+        serializer: &mut dyn erased_serde::Serializer,
     ) -> Result<bool, ErrorKind> {
-        (self.serialize_difference)(unchanged, changed,serializer)
+        (self.serialize_difference)(unchanged, changed, serializer)
     }
 
     pub fn serialize_difference_with_current(
         &self,
         world: &World,
-        entity: legion::entity::Entity,
+        entity: Entity,
         unchanged: &mut dyn erased_serde::Deserializer,
         serializer: &mut dyn erased_serde::Serializer,
-    ) -> Result<Option<Vec<u8>>, ErrorKind> {
+    ) -> Result<bool, ErrorKind> {
         (self.serialize_difference_with_current)(world, entity, unchanged, serializer)
     }
 
@@ -159,7 +149,20 @@ impl ComponentRegistration {
         (self.grand_write_access)(system_builder)
     }
 
-    pub fn add_component(&self, world: &mut World, entity: Entity, component_raw: &mut dyn erased_serde::Deserializer) {
+    pub fn register_into_registry (&self, registry: &mut legion::Registry<String>) {
+        (self.register_into_registry)(registry)
+    }
+
+    pub fn register_into_merger(&self, merger: &mut legion::world::Duplicate) {
+        (self.register_into_merger)(merger)
+    }
+
+    pub fn add_component(
+        &self,
+        world: &mut World,
+        entity: Entity,
+        component_raw: &mut dyn erased_serde::Deserializer,
+    ) {
         (self.add_component)(world, entity, component_raw)
     }
 
@@ -167,20 +170,27 @@ impl ComponentRegistration {
         (self.remove_component)(world, entity)
     }
 
-    pub fn apply_changes(&self, world: &mut World, entity: Entity, data: &mut dyn erased_serde::Deserializer) {
+    pub fn apply_changes(
+        &self,
+        world: &mut World,
+        entity: Entity,
+        data: &mut dyn erased_serde::Deserializer,
+    ) {
         (self.apply_changes)(world, entity, data)
     }
 
+
+
     pub fn of<
         T: Clone
-        + Debug
-        + Serialize
-        + for<'de> Deserialize<'de>
-        + Send
-        + Sync
-        + SerdeDiff
-        + Default
-        + 'static,
+            + Debug
+            + Serialize
+            + for<'de> Deserialize<'de>
+            + Send
+            + Sync
+            + SerdeDiff
+            + Default
+            + 'static,
     >() -> Self {
         Self {
             component_type_id: ComponentTypeId::of::<T>(),
@@ -195,24 +205,32 @@ impl ComponentRegistration {
                 }
             },
             exists_in_subworld: |world, entity| -> bool {
-                world.get_component::<T>(entity).is_some()
+                if let Some(entry) = world.entry_ref(entity) {
+                    entry.get_component::<T>().is_ok()
+                }else {
+                    false
+                }
             },
             exists_in_world: |world, entity| -> bool {
-                world.get_component::<T>(entity).is_some()
+                if let Some(entry) = world.entry_ref(entity) {
+                    entry.get_component::<T>().is_ok()
+                }else {
+                    false
+                }
             },
             serialize_if_exists_in_world: |world, entity, serializer_fn| {
-                if let Some(component) = world.get_component::<T>(entity) {
-                    serializer_fn(&*component);
+                if let Some(entry) = world.entry_ref(entity) {
+                    if let Ok(component) = entry.get_component::<T>() {
+                        serializer_fn(&*component);
+                    }
                 }
             },
             serialize_difference: |unchanged, changed, serializer| {
-                let unchanged =
-                    erased_serde::deserialize::<T>(unchanged)
-                        .expect("failed to deserialize component");
+                let unchanged = erased_serde::deserialize::<T>(unchanged)
+                    .expect("failed to deserialize component");
 
-                let changed =
-                    erased_serde::deserialize::<T>(changed)
-                        .expect("failed to deserialize component");
+                let changed = erased_serde::deserialize::<T>(changed)
+                    .expect("failed to deserialize component");
 
                 let diff = Config::new()
                     .with_field_path_mode(FieldPathMode::Index)
@@ -223,49 +241,58 @@ impl ComponentRegistration {
 
                 Ok(diff.has_changes())
             },
-            serialize_difference_with_current:
-            |world, entity, unchanged, serializer| {
-                let unchanged =
-                    erased_serde::deserialize::<T>(unchanged)
-                        .expect("failed to deserialize component");
+            serialize_difference_with_current: |world, entity, unchanged, serializer| {
+                let unchanged = erased_serde::deserialize::<T>(unchanged)
+                    .expect("failed to deserialize component");
 
-                let changed = world.get_component::<T>(entity)
-                    .expect("failed to get component");;
+                if let Some(entry) = world.entry_ref(entity) {
+                    let changed = entry.get_component::<T>().expect("failed to get component");
 
-                if let Some(latest) = world.get_component::<T>(entity) {
                     let diff = Config::new()
                         .with_field_path_mode(FieldPathMode::Index)
                         .serializable_diff(&unchanged, &changed);
 
                     <serde_diff::Diff<T> as serde::ser::Serialize>::serialize(&diff, serializer)
                         .expect("failed to serialize diff");
+
+                    return Ok(diff.has_changes());
                 }
-                Ok(None)
+
+                Ok(false)
             },
             grand_read_access: |system_builder| system_builder.read_component::<T>(),
             grand_write_access: |system_builder| system_builder.write_component::<T>(),
+            register_into_registry: |registry| {
+                registry.register::<T>(std::any::type_name::<T>().to_string());
+            },
+            register_into_merger: |registry| {
+                registry.register_clone::<T>();
+            },
             add_component: |world, entity, data| {
                 let component =
-                    erased_serde::deserialize::<T>(data)
-                        .expect("failed to deserialize component");
+                    erased_serde::deserialize::<T>(data).expect("failed to deserialize component");
 
-                world
-                    .add_component::<T>(entity, component)
-                    .expect("Can not add component to world.");
+                if let Some(mut entry) = world.entry(entity) {
+                    entry
+                        .add_component::<T>(component);
+                }
             },
             remove_component: |world, entity| {
-                world
-                    .remove_component::<T>(entity)
-                    .expect("Can not remove component from world.");
+                if let Some(mut entry) = world.entry(entity) {
+                    entry
+                        .remove_component::<T>();
+                }
             },
             apply_changes: |world, entity, data| {
-                let mut component = world
-                    .get_component_mut::<T>(entity)
-                    .expect("Component should exist.");
+                if let Some(mut entry) = world.entry(entity) {
+                   let mut component = entry
+                        .get_component_mut::<T>()
+                        .expect("Can not apply changes to component.");
 
-                <serde_diff::Apply<T> as serde::de::DeserializeSeed>::deserialize(
-                    serde_diff::Apply::deserializable(&mut component),
-                    data);
+                    <serde_diff::Apply<T> as serde::de::DeserializeSeed>::deserialize(
+                        serde_diff::Apply::deserializable(&mut component),
+                        data);
+                };
             },
         }
     }
@@ -296,7 +323,7 @@ impl ComponentRegister {
         registered_components
     }
 
-    pub fn iter(&self) -> impl Iterator<Item=ComponentRegistrationRef> {
+    pub fn iter(&self) -> impl Iterator<Item = ComponentRegistrationRef> {
         inventory::iter::<ComponentRegistration>.into_iter()
     }
 }
@@ -304,9 +331,9 @@ impl ComponentRegister {
 #[macro_export]
 macro_rules! register_component_type {
     ($component_type:ty) => {
-       inventory::submit!{
-            $crate::register::ComponentRegistration::of::<$component_type>()
-       }
+        inventory::submit! {
+             $crate::register::ComponentRegistration::of::<$component_type>()
+        }
     };
 }
 
@@ -325,7 +352,7 @@ pub mod test {
     #[derive(Clone, Default, Debug, Serialize, Deserialize, SerdeDiff)]
     struct Component {}
 
-    crate ::register_component_type!(Component, Bincode);
+    crate::register_component_type!(Component, Bincode);
 
     #[test]
     fn registered_by_component_id_should_be_filled_test() {

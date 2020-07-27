@@ -2,7 +2,7 @@
 
 use std::net::{SocketAddr, TcpListener};
 
-use legion::prelude::{Entity, Resources};
+use legion::{Entity, systems::{Resources}, Registry};
 
 use net_sync::{
     compression::CompressionStrategy,
@@ -24,6 +24,7 @@ pub use self::{
     event::EventResource,
 };
 use net_sync::event::NetworkEventQueue;
+use legion::serialize::SerializableTypeId;
 
 mod buffer;
 mod component;
@@ -48,10 +49,7 @@ pub trait ResourcesExt {
         compression: C,
     );
 
-    fn insert_required<C: CompressionStrategy + 'static>(
-        &mut self,
-        compression: C,
-    );
+    fn insert_required<C: CompressionStrategy + 'static>(&mut self, compression: C);
 
     fn insert_tcp_client_resources<
         ServerToClientMessage: NetworkMessage,
@@ -93,19 +91,19 @@ impl ResourcesExt for Resources {
             10,
         ));
         self.insert(ResimulationBuffer::<ClientToServerCommand>::new());
-        self.insert_required( compression);
+        self.insert_required(compression);
     }
 
-    fn insert_required<C: CompressionStrategy + 'static>(
-        &mut self,
-        __compression: C,
-    ) {
+    fn insert_required<C: CompressionStrategy + 'static>(&mut self, __compression: C) {
         self.insert(BufferResource::from_capacity(5000));
         self.insert(RegisteredComponentsResource::new());
         self.insert(UidAllocator::<Entity>::new());
         self.insert(TrackResource::new());
         self.insert(CommandFrameTicker::new(30.));
-        self.insert(NetworkEventQueue::new())
+        self.insert(NetworkEventQueue::new());
+
+        let mut registered_components = RegisteredComponentsResource::new();
+        self.insert(registered_components);
     }
 
     fn insert_tcp_client_resources<

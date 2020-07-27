@@ -1,31 +1,25 @@
-// use legion::{
-//     entity::EntityAllocator,
-//     prelude::*,
-//     storage::{
-//         ArchetypeDescription, ComponentMeta, ComponentResourceSet, ComponentTypeId, TagMeta,
-//         TagStorage, TagTypeId,
-//     },
-// };
+// use crate::register::ComponentRegistration;
+// use legion::{world::EntityAllocator, prelude::*, storage::{
+//     ArchetypeDescription, ComponentMeta, ComponentResourceSet, ComponentTypeId, TagMeta,
+//     TagStorage, TagTypeId,
+// }};
+// use net_sync::uid;
+// use net_sync::uid::{Uid, UidAllocator};
 // use serde::{
 //     de::{self, DeserializeSeed, IgnoredAny, Visitor},
 //     Deserialize, Deserializer, Serialize, Serializer,
 // };
+// use std::any::Any;
+// use std::iter::FromIterator;
 // use std::{any::TypeId, cell::RefCell, collections::HashMap, marker::PhantomData, ptr::NonNull};
 // use type_uuid::TypeUuid;
-// use crate::register::ComponentRegistration;
-// use net_sync::uid::UidAllocator;
-// use std::any::Any;
 //
-// #[derive(TypeUuid, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
-// #[uuid = "5fd8256d-db36-4fe2-8211-c7b3446e1927"]
-// struct Pos(f32, f32, f32);
-// #[derive(TypeUuid, Serialize, Deserialize, Clone, Copy, Debug, PartialEq)]
-// #[uuid = "14dec17f-ae14-40a3-8e44-e487fc423287"]
-// struct Vel(f32, f32, f32);
-// #[derive(Clone, Copy, Debug, PartialEq)]
-// struct Unregistered(f32, f32, f32);
+// use crate::resources::{HashmapRegistry, RegisteredComponentsResource};
+// use serde::de::Error;
 //
-// struct ComponentDeserializer<'de, T: Deserialize<'de>> {
+// use std::fs::read_to_string;
+//
+// pub struct ComponentDeserializer<'de, T: Deserialize<'de>> {
 //     ptr: *mut T,
 //     _marker: PhantomData<&'de T>,
 // }
@@ -33,8 +27,8 @@
 // impl<'de, T: Deserialize<'de> + 'static> DeserializeSeed<'de> for ComponentDeserializer<'de, T> {
 //     type Value = ();
 //     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-//         where
-//             D: Deserializer<'de>,
+//     where
+//         D: Deserializer<'de>,
 //     {
 //         let value = <T as Deserialize<'de>>::deserialize(deserializer)?;
 //         unsafe {
@@ -44,24 +38,25 @@
 //     }
 // }
 //
-// struct ComponentSeqDeserializer<'a, T> {
-//     get_next_storage_fn: &'a mut dyn FnMut() -> Option<(NonNull<u8>, usize)>,
-//     _marker: PhantomData<T>,
+// pub struct ComponentSeqDeserializer<'a, T> {
+//     pub (crate) get_next_storage_fn: &'a mut dyn FnMut() -> Option<(NonNull<u8>, usize)>,
+//     pub (crate) _marker: PhantomData<T>,
 // }
 //
 // impl<'de, 'a, T: for<'b> Deserialize<'b> + 'static> DeserializeSeed<'de>
-// for ComponentSeqDeserializer<'a, T>
+//     for ComponentSeqDeserializer<'a, T>
 // {
 //     type Value = ();
 //     fn deserialize<D>(self, deserializer: D) -> Result<Self::Value, D::Error>
-//         where
-//             D: Deserializer<'de>,
+//     where
+//         D: Deserializer<'de>,
 //     {
 //         deserializer.deserialize_seq(self)
 //     }
 // }
+//
 // impl<'de, 'a, T: for<'b> Deserialize<'b> + 'static> Visitor<'de>
-// for ComponentSeqDeserializer<'a, T>
+//     for ComponentSeqDeserializer<'a, T>
 // {
 //     type Value = ();
 //
@@ -69,8 +64,8 @@
 //         formatter.write_str("sequence of objects")
 //     }
 //     fn visit_seq<A>(self, mut seq: A) -> Result<Self::Value, A::Error>
-//         where
-//             A: de::SeqAccess<'de>,
+//     where
+//         A: de::SeqAccess<'de>,
 //     {
 //         let size = seq.size_hint();
 //         for _ in 0..size.unwrap_or(std::usize::MAX) {
@@ -102,16 +97,18 @@
 //                         break;
 //                     }
 //                 }
+//                 _ => {}
 //             }
 //         }
+//
 //         Ok(())
 //     }
 // }
 //
 // #[derive(Clone)]
-// struct TagRegistration {
-//     uuid: type_uuid::Bytes,
-//     ty: TypeId,
+// pub struct TagRegistration {
+//     pub uuid: type_uuid::Bytes,
+//     pub ty: TypeId,
 //     tag_serialize_fn: fn(&TagStorage, &mut dyn FnMut(&dyn erased_serde::Serialize)),
 //     tag_deserialize_fn: fn(
 //         deserializer: &mut dyn erased_serde::Deserializer,
@@ -121,15 +118,15 @@
 // }
 //
 // impl TagRegistration {
-//     fn of<
+//     pub fn of<
 //         T: TypeUuid
-//         + Serialize
-//         + for<'de> Deserialize<'de>
-//         + PartialEq
-//         + Clone
-//         + Send
-//         + Sync
-//         + 'static,
+//             + Serialize
+//             + for<'de> Deserialize<'de>
+//             + PartialEq
+//             + Clone
+//             + Send
+//             + Sync
+//             + 'static,
 //     >() -> Self {
 //         Self {
 //             uuid: T::UUID,
@@ -158,23 +155,29 @@
 // }
 //
 // #[derive(Serialize, Deserialize)]
-// struct SerializedArchetypeDescription {
+// pub struct SerializedArchetypeDescription {
 //     tag_types: Vec<type_uuid::Bytes>,
-//     component_types: Vec<type_uuid::Bytes>,
+//     component_types: Vec<u32>,
 // }
 //
-// struct SerializeImpl {
-//     tag_types: HashMap<TypeId, TagRegistration>,
-//     comp_types: HashMap<TypeId, ComponentRegistration>,
-//     entity_map: RefCell<HashMap<Entity, u32>>,
+// pub struct SerializeImplementation {
+//     pub tag_types: HashMap<TypeId, TagRegistration>,
+//
+//     pub registered_components: RegisteredComponentsResource,
+//
+//     pub entity_map: RefCell<HashMap<Entity, u32>>,
 // }
-// impl legion::serialize::ser::WorldSerializer for SerializeImpl {
+//
+// impl legion::serialize::ser::WorldSerializer for SerializeImplementation {
 //     fn can_serialize_tag(&self, ty: &TagTypeId, _meta: &TagMeta) -> bool {
 //         self.tag_types.get(&ty.type_id()).is_some()
 //     }
+//
 //     fn can_serialize_component(&self, ty: &ComponentTypeId, _meta: &ComponentMeta) -> bool {
-//         self.comp_types.get(&ty.type_id()).is_some()
+//         let registry = self.registered_components.by_type_id();
+//         registry.get(&ty.type_id()).is_some()
 //     }
+//
 //     fn serialize_archetype_description<S: Serializer>(
 //         &self,
 //         serializer: S,
@@ -186,18 +189,21 @@
 //             .filter_map(|(ty, _)| self.tag_types.get(&ty.type_id()))
 //             .map(|reg| reg.uuid)
 //             .collect::<Vec<_>>();
+//
 //         let components_to_serialize = archetype_desc
 //             .components()
 //             .iter()
-//             .filter_map(|(ty, _)| self.comp_types.get(&ty.type_id()))
-//             .map(|reg| reg.uuid)
-//             .collect::<Vec<_>>();
+//             .filter_map(|(ty, _)| self.registered_components.get_uid(&ty.type_id()))
+//             .map(|reg| *reg)
+//             .collect::<Vec<Uid>>();
+//
 //         SerializedArchetypeDescription {
 //             tag_types: tags_to_serialize,
 //             component_types: components_to_serialize,
 //         }
 //             .serialize(serializer)
 //     }
+//
 //     fn serialize_components<S: Serializer>(
 //         &self,
 //         serializer: S,
@@ -205,12 +211,14 @@
 //         _component_meta: &ComponentMeta,
 //         components: &ComponentResourceSet,
 //     ) -> Result<S::Ok, S::Error> {
-//         if let Some(reg) = self.comp_types.get(&component_type.type_id()) {
+//         let registry = self.registered_components.by_type_id();
+//
+//         if let Some(registration) = registry.get(&component_type.type_id()) {
 //             let result = RefCell::new(None);
 //             let serializer = RefCell::new(Some(serializer));
 //             {
 //                 let mut result_ref = result.borrow_mut();
-//                 (reg.comp_serialize_fn)(components, &mut |serialize| {
+//                 registration.component_serialize_fn(components, &mut |serialize| {
 //                     result_ref.replace(erased_serde::serialize(
 //                         serialize,
 //                         serializer.borrow_mut().take().unwrap(),
@@ -219,11 +227,13 @@
 //             }
 //             return result.borrow_mut().take().unwrap();
 //         }
+//
 //         panic!(
 //             "received unserializable type {:?}, this should be filtered by can_serialize",
 //             component_type
 //         );
 //     }
+//
 //     fn serialize_tags<S: Serializer>(
 //         &self,
 //         serializer: S,
@@ -231,12 +241,12 @@
 //         _tag_meta: &TagMeta,
 //         tags: &TagStorage,
 //     ) -> Result<S::Ok, S::Error> {
-//         if let Some(reg) = self.tag_types.get(&tag_type.type_id()) {
+//         if let Some(registration) = self.tag_types.get(&tag_type.type_id()) {
 //             let result = RefCell::new(None);
 //             let serializer = RefCell::new(Some(serializer));
 //             {
 //                 let mut result_ref = result.borrow_mut();
-//                 (reg.tag_serialize_fn)(tags, &mut |serialize| {
+//                 (registration.tag_serialize_fn)(tags, &mut |serialize| {
 //                     result_ref.replace(erased_serde::serialize(
 //                         serialize,
 //                         serializer.borrow_mut().take().unwrap(),
@@ -250,47 +260,59 @@
 //             tag_type
 //         );
 //     }
+//
 //     fn serialize_entities<S: Serializer>(
 //         &self,
 //         serializer: S,
 //         entities: &[Entity],
 //     ) -> Result<S::Ok, S::Error> {
-//         let mut uuid_map = self.entity_map.borrow_mut();
+//         let mut uid_map = self.entity_map.borrow_mut();
 //         serializer.collect_seq(entities.iter().map(|e| {
-//             *uuid_map
-//                 .entry(*e)
-//                 .or_insert_with(|| *uuid::Uuid::new_v4().as_bytes())
-//         }))
+//             if let Some(result) = uid_map.get(e) {
+//                 return Some(*result);
+//             }
+//             None
+//         })
+//             .filter(|x| x.is_some())
+//         )
 //     }
 // }
 //
-// struct DeserializeImpl {
-//     tag_types: HashMap<TypeId, TagRegistration>,
-//     comp_types: HashMap<TypeId, ComponentRegistration>,
-//     tag_types_by_uuid: HashMap<type_uuid::Bytes, TagRegistration>,
-//     comp_types_by_uuid: HashMap<type_uuid::Bytes, ComponentRegistration>,
-//     entity_map: RefCell<HashMap<uuid::Bytes, Entity>>,
+// pub struct DeserializeImplementation {
+//    pub tag_types: HashMap<TypeId, TagRegistration>,
+//    pub tag_types_by_uuid: HashMap<type_uuid::Bytes, TagRegistration>,
+//
+//    pub registered_components: RegisteredComponentsResource,
+//    pub entity_map: RefCell<HashMap<uid::Uid, Entity>>,
 // }
-// impl legion::serialize::de::WorldDeserializer for DeserializeImpl {
+//
+// impl legion::serialize::de::WorldDeserializer for DeserializeImplementation {
 //     fn deserialize_archetype_description<'de, D: Deserializer<'de>>(
 //         &self,
 //         deserializer: D,
 //     ) -> Result<ArchetypeDescription, <D as Deserializer<'de>>::Error> {
 //         let serialized_desc =
 //             <SerializedArchetypeDescription as Deserialize>::deserialize(deserializer)?;
+//
 //         let mut desc = ArchetypeDescription::default();
+//
 //         for tag in serialized_desc.tag_types {
-//             if let Some(reg) = self.tag_types_by_uuid.get(&tag) {
-//                 (reg.register_tag_fn)(&mut desc);
+//             if let Some(registration) = self.tag_types_by_uuid.get(&tag) {
+//                 (registration.register_tag_fn)(&mut desc);
 //             }
 //         }
+//
+//         let registration = self.registered_components.by_uid();
+//
 //         for comp in serialized_desc.component_types {
-//             if let Some(reg) = self.comp_types_by_uuid.get(&comp) {
-//                 (reg.register_comp_fn)(&mut desc);
+//             if let Some(registration) = registration.get(&comp) {
+//                 registration.register_component_fn(&mut desc);
 //             }
 //         }
+//
 //         Ok(desc)
 //     }
+//
 //     fn deserialize_components<'de, D: Deserializer<'de>>(
 //         &self,
 //         deserializer: D,
@@ -298,15 +320,18 @@
 //         _component_meta: &ComponentMeta,
 //         get_next_storage_fn: &mut dyn FnMut() -> Option<(NonNull<u8>, usize)>,
 //     ) -> Result<(), <D as Deserializer<'de>>::Error> {
-//         if let Some(reg) = self.comp_types.get(&component_type.type_id()) {
+//         let registry = self.registered_components.by_type_id();
+//         if let Some(reg) = registry.get(&component_type.type_id()) {
 //             let mut erased = erased_serde::Deserializer::erase(deserializer);
-//             (reg.comp_deserialize_fn)(&mut erased, get_next_storage_fn)
+//             reg.component_deserialize_fn(&mut erased, get_next_storage_fn)
 //                 .map_err(<<D as serde::Deserializer<'de>>::Error as serde::de::Error>::custom)?;
 //         } else {
 //             <IgnoredAny>::deserialize(deserializer)?;
 //         }
+//
 //         Ok(())
 //     }
+//
 //     fn deserialize_tags<'de, D: Deserializer<'de>>(
 //         &self,
 //         deserializer: D,
@@ -323,13 +348,14 @@
 //         }
 //         Ok(())
 //     }
+//
 //     fn deserialize_entities<'de, D: Deserializer<'de>>(
 //         &self,
 //         deserializer: D,
 //         entity_allocator: &EntityAllocator,
 //         entities: &mut Vec<Entity>,
 //     ) -> Result<(), <D as Deserializer<'de>>::Error> {
-//         let entity_uuids = <Vec<uuid::Bytes> as Deserialize>::deserialize(deserializer)?;
+//         let entity_uuids = <Vec<u32> as Deserialize>::deserialize(deserializer)?;
 //         let mut entity_map = self.entity_map.borrow_mut();
 //         for id in entity_uuids {
 //             let entity = entity_allocator.create_entity();
@@ -338,97 +364,4 @@
 //         }
 //         Ok(())
 //     }
-// }
-//
-// fn main() {
-//     // create world
-//     let universe = Universe::new();
-//     let mut world = universe.create_world();
-//
-//     // Pos and Vel are both serializable, so all components in this chunkset will be serialized
-//     world.insert(
-//         (),
-//         vec![
-//             (Pos(1., 2., 3.), Vel(1., 2., 3.)),
-//             (Pos(1., 2., 3.), Vel(1., 2., 3.)),
-//             (Pos(1., 2., 3.), Vel(1., 2., 3.)),
-//             (Pos(1., 2., 3.), Vel(1., 2., 3.)),
-//         ],
-//     );
-//     // Unserializable components are not serialized, so only the Pos components should be serialized in this chunkset
-//     for _ in 0..1000 {
-//         world.insert(
-//             (Pos(4., 5., 6.), Unregistered(4., 5., 6.)),
-//             vec![
-//                 (Pos(1., 2., 3.), Unregistered(4., 5., 6.)),
-//                 (Pos(1., 2., 3.), Unregistered(4., 5., 6.)),
-//                 (Pos(1., 2., 3.), Unregistered(4., 5., 6.)),
-//                 (Pos(1., 2., 3.), Unregistered(4., 5., 6.)),
-//             ],
-//         );
-//     }
-//     // Entities with no serializable components are not serialized, so this entire chunkset should be skipped in the output
-//     world.insert(
-//         (Unregistered(4., 5., 6.),),
-//         vec![(Unregistered(4., 5., 6.),), (Unregistered(4., 5., 6.),)],
-//     );
-//
-//     let comp_registrations = [
-//         ComponentRegistration::of::<Pos>(),
-//         ComponentRegistration::of::<Vel>(),
-//     ];
-//     let tag_registrations = [TagRegistration::of::<Pos>(), TagRegistration::of::<Vel>()];
-//
-//     use std::iter::FromIterator;
-//     let ser_helper = SerializeImpl {
-//         comp_types: HashMap::from_iter(comp_registrations.iter().map(|reg| (reg.ty, reg.clone()))),
-//         tag_types: HashMap::from_iter(tag_registrations.iter().map(|reg| (reg.ty, reg.clone()))),
-//         entity_map: RefCell::new(HashMap::new()),
-//     };
-//
-//     let serializable = legion::serialize::ser::serializable_world(&world, &ser_helper);
-//     let serialized_data = serde_json::to_string(&serializable).unwrap();
-//     let de_helper = DeserializeImpl {
-//         tag_types_by_uuid: HashMap::from_iter(
-//             ser_helper
-//                 .tag_types
-//                 .iter()
-//                 .map(|reg| (reg.1.uuid, reg.1.clone())),
-//         ),
-//         comp_types_by_uuid: HashMap::from_iter(
-//             ser_helper
-//                 .comp_types
-//                 .iter()
-//                 .map(|reg| (reg.1.uuid, reg.1.clone())),
-//         ),
-//         tag_types: ser_helper.tag_types,
-//         comp_types: ser_helper.comp_types,
-//         // re-use the entity-uuid mapping
-//         entity_map: RefCell::new(HashMap::from_iter(
-//             ser_helper
-//                 .entity_map
-//                 .into_inner()
-//                 .into_iter()
-//                 .map(|(e, uuid)| (uuid, e)),
-//         )),
-//     };
-//     let mut deserialized_world = universe.create_world();
-//     let mut deserializer = serde_json::Deserializer::from_str(&serialized_data);
-//     legion::serialize::de::deserialize(&mut deserialized_world, &de_helper, &mut deserializer)
-//         .unwrap();
-//     let ser_helper = SerializeImpl {
-//         tag_types: de_helper.tag_types,
-//         comp_types: de_helper.comp_types,
-//         // re-use the entity-uuid mapping
-//         entity_map: RefCell::new(HashMap::from_iter(
-//             de_helper
-//                 .entity_map
-//                 .into_inner()
-//                 .into_iter()
-//                 .map(|(uuid, e)| (e, uuid)),
-//         )),
-//     };
-//     let serializable = legion::serialize::ser::serializable_world(&deserialized_world, &ser_helper);
-//     let roundtrip_data = serde_json::to_string(&serializable).unwrap();
-//     assert_eq!(roundtrip_data, serialized_data);
 // }

@@ -1,9 +1,6 @@
 use std::net::TcpListener;
 
-use legion::{
-    prelude::{any, Entity, Resources, Universe, World},
-    systems::{resource::Resource, schedule::Builder},
-};
+use legion::{{any, Entity, Resources, Universe, World}, systems::{Resource, Builder}, passthrough};
 use log::debug;
 use serde::export::PhantomData;
 
@@ -24,8 +21,10 @@ use crate::{
     systems::BuilderExt,
     world::{world_instance::WorldInstance, WorldBuilder},
 };
+use bincode::{DefaultOptions, Options};
 use net_sync::re_exports::bincode;
-use bincode::DefaultOptions;
+use std::time::Instant;
+use serde::de::DeserializeSeed;
 
 pub struct ServerConfig {}
 
@@ -77,9 +76,7 @@ impl<
     type BuildResult =
         ServerWorld<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>;
 
-    fn default_resources<C: CompressionStrategy + 'static>(
-        self,
-    ) -> Self {
+    fn default_resources<C: CompressionStrategy + 'static>(self) -> Self {
         let mut s = self;
         s.resources
             .insert_server_resources::<C, ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>(C::default());
@@ -111,7 +108,9 @@ impl<
         let mut main_world = universe.create_world();
 
         s.resources
-            .insert(EventResource::new(&mut main_world, any()));
+            .insert(EventResource::new(&mut main_world));
+        s.resources
+            .insert(universe);
 
         let world = WorldInstance::new(main_world, s.system_builder.build());
 
@@ -125,12 +124,7 @@ impl<
         ClientToServerCommand: NetworkCommand,
     > ServerWorldBuilder<ServerToClientMessage, ClientToServerMessage, ClientToServerCommand>
 {
-    pub fn with_tcp<
-//        C: CompressionStrategy + 'static
-    >(
-        mut self,
-        listener: TcpListener,
-    ) -> Self {
+    pub fn with_tcp(mut self, listener: TcpListener) -> Self {
         listener
             .set_nonblocking(true)
             .expect("Cannot set non-blocking on TCP socket.");
@@ -155,6 +149,8 @@ pub struct ServerWorld<
     pub(crate) resources: Resources,
     pub(crate) state_update_sequence: u16,
 
+    pub (crate) last_tick: Instant,
+
     stcm: PhantomData<ServerToClientMessage>,
     ctsm: PhantomData<ClientToServerMessage>,
     ctsc: PhantomData<ClientToServerCommand>,
@@ -176,6 +172,8 @@ impl<
             config: ServerConfig::default(),
             state_update_sequence: 0,
 
+            last_tick: Instant::now(),
+
             stcm: PhantomData,
             ctsm: PhantomData,
             ctsc: PhantomData,
@@ -190,6 +188,8 @@ impl<
         let mut command_ticker = resources.get_mut::<CommandFrameTicker>().unwrap();
 
         if command_ticker.try_tick() {
+            let last_tick = self.last_tick;
+
             // This state packet is for the previous command frame.
             let previous_command_frame = command_ticker.command_frame() - 1;
             let mut world_state = WorldState::new(previous_command_frame);
@@ -217,18 +217,64 @@ impl<
                 &mut world_state,
             );
 
+            let mut postoffice =
+                resources
+                    .get_mut::<PostOffice<
+                        ServerToClientMessage,
+                        ClientToServerMessage,
+                        ClientToServerCommand,
+                    >>()
+                    .unwrap();
+
+            // First do an state update to each new client.
+            let new_clients = postoffice.clients()
+                .filter(|x| x.1.connected_at() > last_tick)
+                .count();
+
+            if new_clients != 0 {
+                let mut new_clients = postoffice.clients_mut()
+                    .filter(|x| x.1.connected_at() > last_tick);
+
+                let bytes = bincode::serialize(
+                    &self.world
+                    .world.as_serializable(any(), components.legion_registry())
+                ).unwrap();
+
+                println!("initial state: {:?} {}", bytes, bytes.len());
+
+                if bytes.len() != 0 {
+                    let universe = resources.get_mut::<Universe>().unwrap();
+
+                    let registry = components.legion_registry();
+
+                    match registry
+                        .as_deserialize(&universe)
+                        .deserialize( &mut bincode::Deserializer::from_slice(&bytes, bincode::DefaultOptions::new()
+                            .with_fixint_encoding()
+                            .allow_trailing_bytes())) {
+                        Ok(world) => {
+                            debug!("deserialize: {:?}", world.len());
+                        }
+                        Err(e) => {
+                            panic!("{:?}", e)
+                        }
+                    }
+
+                    for (_id, mut client) in new_clients {
+                        debug!("Initial state sync to client {:?}", _id);
+                        client.postbox_mut().send(transport::ServerToClientMessage::InitialStateSync(bytes.clone()))
+                    }
+                }
+            }
+
             // Sent state update to all clients.
             if !world_state.is_empty() {
-                let mut postoffice =
-                    resources
-                        .get_mut::<PostOffice<
-                            ServerToClientMessage,
-                            ClientToServerMessage,
-                            ClientToServerCommand,
-                        >>()
-                        .unwrap();
+                // Then broadcast the world state to all clients.
                 postoffice.broadcast(transport::ServerToClientMessage::StateUpdate(world_state));
             }
+
+            self.last_tick = Instant::now();
+
         }
     }
 
@@ -277,17 +323,21 @@ fn handle_world_events(
 
                 let mut entity_components = Vec::new();
 
-               for component in components.slice_with_uid().iter() {
+                for component in components.slice_with_uid().iter() {
                     component
                         .1
                         .serialize_if_exists_in_world(&world, entity, &mut |serialize| {
                             let mut buffer = Vec::new();
-                            let mut serializer =  &mut bincode::Serializer::new(&mut buffer, DefaultOptions::default());
+                            let mut serializer = &mut bincode::Serializer::new(
+                                &mut buffer,
+                                bincode::DefaultOptions::new()
+                                .with_fixint_encoding()
+                                .allow_trailing_bytes()
+                            );
 
-                           if let Ok(_) = erased_serde::serialize(&serialize, serializer) {
-                               entity_components
-                                   .push(ComponentData::new(component.0, buffer));
-                           }
+                            if let Ok(_) = erased_serde::serialize(&serialize, serializer) {
+                                entity_components.push(ComponentData::new(component.0, buffer));
+                            }
                         });
                 }
 
@@ -315,16 +365,28 @@ fn add_differences_to_state(
             let registered_component = components.get(&component_type).expect("Should exist");
 
             let mut buffer = Vec::new();
-            let mut serializer = &mut bincode::Serializer::new(&mut buffer, DefaultOptions::default());
-            let mut unchanged = &mut bincode::Deserializer::from_slice(&unchanged, DefaultOptions::default());
+            let mut serializer =
+                &mut bincode::Serializer::new(&mut buffer, bincode::DefaultOptions::new()
+                    .with_fixint_encoding()
+                    .allow_trailing_bytes());
 
+            let mut unchanged =
+                &mut bincode::Deserializer::from_slice(&unchanged, bincode::DefaultOptions::new()
+                    .with_fixint_encoding()
+                    .allow_trailing_bytes());
 
-            let difference = registered_component
-                .serialize_difference_with_current(world, *entity,&mut erased_serde::Deserializer::erase(unchanged), &mut erased_serde::Serializer::erase(serializer))
-                .unwrap()
+            let is_different = registered_component
+                .serialize_difference_with_current(
+                    world,
+                    *entity,
+                    &mut erased_serde::Deserializer::erase(unchanged),
+                    &mut erased_serde::Serializer::erase(serializer),
+                )
                 .unwrap();
 
-            world_state.change(entity_id, ComponentData::new(*component_id, difference));
+            if is_different {
+                world_state.change(entity_id, ComponentData::new(*component_id, buffer));
+            }
         }
     }
 }

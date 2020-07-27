@@ -1,10 +1,11 @@
 use std::{collections::HashMap, fmt::Debug};
 
 use crossbeam_channel::Receiver;
-use legion::prelude::Entity;
+use legion::Entity;
 use serde::export::{fmt::Error, Formatter};
 
 use crate::{resources::RegisteredComponentsResource, world::WorldAbstraction};
+use legion::world::Event;
 
 #[derive(Copy, Clone, Eq, PartialEq, Hash)]
 pub enum LegionEvent {
@@ -19,20 +20,20 @@ impl Debug for LegionEvent {
         match &self {
             LegionEvent::ComponentAdded(entity_id, count) => write!(
                 f,
-                "Component Added to Entity: {}, {} components",
+                "Component Added to Entity: {:?}, {} components",
                 entity_id, count
             ),
             LegionEvent::ComponentRemoved(entity_id, count) => write!(
                 f,
-                "Component Removed from Entity: {}, {} components",
+                "Component Removed from Entity: {:?}, {} components",
                 entity_id, count
             ),
             LegionEvent::EntityInserted(entity_id, count) => write!(
                 f,
-                "Entity Inserted: {} with {} components",
+                "Entity Inserted: {:?} with {} components",
                 entity_id, count
             ),
-            LegionEvent::EntityRemoved(entity_id) => write!(f, "Entity Removed: {}", entity_id),
+            LegionEvent::EntityRemoved(entity_id) => write!(f, "Entity Removed: {:?}", entity_id),
         }
     }
 }
@@ -100,17 +101,17 @@ impl LegionEventHandler {
     /// The following code keeps track of what kind of events are in the receiver and assumes the type of event based on input data.
     pub fn handle(
         &mut self,
-        receiver: &Receiver<legion::event::Event>,
+        receiver: &Receiver<Event>,
         world: &dyn WorldAbstraction,
         registered: &RegisteredComponentsResource,
     ) -> Vec<LegionEvent> {
-        let events = receiver.try_iter().collect::<Vec<legion::event::Event>>();
+        let events = receiver.try_iter().collect::<Vec<Event>>();
         let mut result_events = Vec::with_capacity(events.len());
         let mut iterator = events.into_iter();
 
         while let Some(event) = iterator.next() {
             match event {
-                legion::event::Event::EntityInserted(inserted, _chunk) => {
+                Event::EntityInserted(inserted, _chunk) => {
                     if self.tracker.contains_inserted(inserted)
                         && self.tracker.contains_removed(inserted)
                     {
@@ -142,7 +143,7 @@ impl LegionEventHandler {
                         // Check if the following events contain an remove with the current entity id.
                         // This would indicate an component add/remove on this inserted entity.
                         let find_result = events.any(|x| match x {
-                            legion::event::Event::EntityRemoved(entity, _) => entity == inserted,
+                            Event::EntityRemoved(entity, _) => entity == inserted,
                             _ => false,
                         });
 
@@ -157,7 +158,7 @@ impl LegionEventHandler {
                         result_events.push(LegionEvent::EntityInserted(inserted, components_count))
                     }
                 }
-                legion::event::Event::EntityRemoved(removed, _chunk_id) => {
+                Event::EntityRemoved(removed, _chunk_id) => {
                     if !self.tracker.contains_inserted(removed) {
                         // We have not seen an insert with this entity before.
                         // This can't be a re-allocation.
@@ -168,7 +169,7 @@ impl LegionEventHandler {
                         let mut events = iterator.clone();
 
                         let find_result = events.any(|x| match x {
-                            legion::event::Event::EntityInserted(entity, _) => entity == removed,
+                            Event::EntityInserted(entity, _) => entity == removed,
                             _ => false,
                         });
 
@@ -184,8 +185,7 @@ impl LegionEventHandler {
                         }
                     }
                 }
-                legion::event::Event::ArchetypeCreated(_id) => {}
-                legion::event::Event::ChunkCreated(_) => {}
+                Event::ArchetypeCreated(_) => {}
             }
         }
 
